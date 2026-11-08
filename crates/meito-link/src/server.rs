@@ -20,7 +20,7 @@ use std::time::{Duration, Instant, SystemTime};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Incoming;
-use hyper::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
+use hyper::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
@@ -30,7 +30,7 @@ use tokio::sync::Semaphore;
 
 use crate::access_log::{append_access_log, AccessLogRecord};
 use crate::auth::{is_sha256_hex, verify_token};
-use crate::contract::{HttpStatusPolicy, LinkContract};
+use crate::contract::{HttpStatusPolicy, LinkContract, OperationAuth};
 use crate::rate_limit::RateLimiter;
 use crate::router::{is_valid_channel_id, route, Route};
 use crate::store::{ChannelStore, Registration, StoreError};
@@ -293,9 +293,10 @@ async fn dispatch(
 
     let method = request.method().as_str().to_string();
     let target = request.uri().path().to_string();
+    let auth_header_name = state.contract.auth_header.name.to_ascii_lowercase();
     let authorization = request
         .headers()
-        .get(AUTHORIZATION)
+        .get(auth_header_name.as_str())
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
     let declared_length = request
@@ -321,8 +322,13 @@ async fn dispatch(
                 return Outcome::new(status_map.rate_limited)
                     .with_channel(&channel_id, Some(declared_length as u64));
             }
-            if let Err(status) = authorize(state, &channel_id, authorization.as_deref(), true, now)
-            {
+            if let Err(status) = authorize(
+                state,
+                &channel_id,
+                authorization.as_deref(),
+                state.contract.operations.put.auth,
+                now,
+            ) {
                 return Outcome::new(status)
                     .with_channel(&channel_id, Some(declared_length as u64));
             }
@@ -335,7 +341,7 @@ async fn dispatch(
                 };
             let size = Some(body.len() as u64);
             match state.store.put_ciphertext(&channel_id, body, now) {
-                Ok(()) => Outcome::new(200).with_channel(&channel_id, size),
+                Ok(()) => Outcome::new(status_map.success).with_channel(&channel_id, size),
                 Err(error) => {
                     Outcome::new(store_status(error, status_map)).with_channel(&channel_id, size)
                 }
@@ -388,7 +394,7 @@ async fn read_body(
 /// 不返回错误。
 fn store_status(error: StoreError, status: &HttpStatusPolicy) -> u16 {
     match error {
-        StoreError::ChannelExists => status.malformed,
+        StoreError::ChannelExists => status.duplicate_channel,
         StoreError::NotFound | StoreError::Expired => status.unknown_channel,
         StoreError::TooLarge => status.too_large,
         StoreError::MaxReadsReached => status.rate_limited,
@@ -399,13 +405,14 @@ fn store_status(error: StoreError, status: &HttpStatusPolicy) -> u16 {
 ///
 /// # 参数
 /// - `authorization`: 请求头原始值。
+/// - `scheme`: 契约声明的鉴权方案。
 ///
 /// # 错误
 /// 不返回错误；缺失或格式不对返回 `None`。
-fn bearer_token(authorization: Option<&str>) -> Option<&str> {
+fn bearer_token<'a>(authorization: Option<&'a str>, scheme: &str) -> Option<&'a str> {
     let value = authorization?;
-    let (scheme, token) = value.split_once(' ')?;
-    if !scheme.eq_ignore_ascii_case("bearer") {
+    let (presented_scheme, token) = value.split_once(' ')?;
+    if !presented_scheme.eq_ignore_ascii_case(scheme) {
         return None;
     }
     let token = token.trim();
@@ -422,7 +429,7 @@ fn bearer_token(authorization: Option<&str>) -> Option<&str> {
 /// - `state`: 服务端共享状态。
 /// - `channel_id`: 请求路径中的通道 id。
 /// - `authorization`: 请求头中的令牌原文。
-/// - `write`: `true` 用写令牌校验，`false` 用读令牌校验。
+/// - `auth`: 契约声明的鉴权角色，决定使用读 token还是写 token。
 /// - `now`: 当前墙钟时间。
 ///
 /// # 错误
@@ -431,7 +438,7 @@ fn authorize(
     state: &ServerState,
     channel_id: &str,
     authorization: Option<&str>,
-    write: bool,
+    auth: OperationAuth,
     now: SystemTime,
 ) -> Result<(), u16> {
     let status_map = &state.contract.http_status;
@@ -439,12 +446,13 @@ fn authorize(
         .store
         .credentials(channel_id, now)
         .ok_or(status_map.unknown_channel)?;
-    let expected = if write {
+    let expected = if auth.uses_write_token() {
         credentials.write_token_hash.as_str()
     } else {
         credentials.read_token_hash.as_str()
     };
-    let presented = bearer_token(authorization).ok_or(status_map.bad_token)?;
+    let presented = bearer_token(authorization, &state.contract.auth_header.scheme)
+        .ok_or(status_map.bad_token)?;
     if verify_token(presented, expected) {
         Ok(())
     } else {
@@ -531,7 +539,7 @@ fn handle_register(state: &ServerState, body: &[u8], now: SystemTime) -> Outcome
     };
     let channel_id = registration.channel_id.clone();
     match state.store.register(registration, now) {
-        Ok(()) => Outcome::new(200).with_channel(&channel_id, None),
+        Ok(()) => Outcome::new(state.contract.http_status.success).with_channel(&channel_id, None),
         Err(error) => Outcome::new(store_status(error, &state.contract.http_status))
             .with_channel(&channel_id, None),
     }
@@ -559,14 +567,20 @@ fn handle_get(
         return Outcome::new(state.contract.http_status.rate_limited)
             .with_channel(channel_id, None);
     }
-    if let Err(status) = authorize(state, channel_id, authorization, false, now) {
+    if let Err(status) = authorize(
+        state,
+        channel_id,
+        authorization,
+        state.contract.operations.get.auth,
+        now,
+    ) {
         return Outcome::new(status).with_channel(channel_id, None);
     }
     match state.store.read_ciphertext(channel_id, now) {
         Ok(blob_read) => {
             let size = blob_read.blob.len() as u64;
             Outcome {
-                status: 200,
+                status: state.contract.http_status.success,
                 body: blob_read.blob,
                 content_type: Some("application/octet-stream"),
                 channel_id: channel_id.to_string(),
@@ -600,11 +614,17 @@ fn handle_delete(
         return Outcome::new(state.contract.http_status.rate_limited)
             .with_channel(channel_id, None);
     }
-    if let Err(status) = authorize(state, channel_id, authorization, true, now) {
+    if let Err(status) = authorize(
+        state,
+        channel_id,
+        authorization,
+        state.contract.operations.delete.auth,
+        now,
+    ) {
         return Outcome::new(status).with_channel(channel_id, None);
     }
     match state.store.delete(channel_id, now) {
-        Ok(()) => Outcome::new(200).with_channel(channel_id, None),
+        Ok(()) => Outcome::new(state.contract.http_status.success).with_channel(channel_id, None),
         Err(error) => Outcome::new(store_status(error, &state.contract.http_status))
             .with_channel(channel_id, None),
     }

@@ -107,9 +107,72 @@ pub struct RateLimitPolicy {
     pub burst: u64,
 }
 
-/// HTTP 状态码映射；七个值全部来自契约。
+/// 鉴权头策略；请求头名称与方案由契约冻结。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthHeaderPolicy {
+    /// 请求头名称，例如 `Authorization`。
+    pub name: String,
+    /// 鉴权方案，例如 `Bearer`。
+    pub scheme: String,
+    /// 需要携带鉴权头的操作名。
+    pub applies_to: Vec<String>,
+}
+
+/// 单个操作使用的鉴权角色。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationAuth {
+    /// 不携带令牌。
+    None,
+    /// 使用读 token。
+    ReadToken,
+    /// 使用写 token。
+    WriteToken,
+}
+
+impl OperationAuth {
+    /// 返回该角色是否要求写 token。
+    ///
+    /// # 参数
+    /// - 无（仅 `&self`）。
+    ///
+    /// # 错误
+    /// 不返回错误。
+    pub fn uses_write_token(&self) -> bool {
+        matches!(self, Self::WriteToken)
+    }
+}
+
+/// 单个操作的策略。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationPolicy {
+    /// HTTP 方法。
+    pub method: String,
+    /// 鉴权角色。
+    pub auth: OperationAuth,
+}
+
+/// 操作清单与重复注册语义。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationsPolicy {
+    /// 注册操作。
+    pub register: OperationPolicy,
+    /// 写入操作。
+    pub put: OperationPolicy,
+    /// 读取操作。
+    pub get: OperationPolicy,
+    /// 撤销操作。
+    pub delete: OperationPolicy,
+    /// 存活通道重复注册时使用的状态键。
+    pub duplicate_live_channel: String,
+}
+
+/// HTTP 状态码映射；九个值全部来自契约。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpStatusPolicy {
+    /// 成功响应。
+    pub success: u16,
+    /// 存活通道重复注册。
+    pub duplicate_channel: u16,
     /// 错误 token。
     pub bad_token: u16,
     /// 未知或已撤销通道。
@@ -162,6 +225,10 @@ pub struct LinkContract {
     pub get_semantics: GetSemanticsPolicy,
     /// 限流策略。
     pub rate_limit: RateLimitPolicy,
+    /// 鉴权头策略。
+    pub auth_header: AuthHeaderPolicy,
+    /// 操作与重复注册策略。
+    pub operations: OperationsPolicy,
     /// HTTP 状态码映射。
     pub http_status: HttpStatusPolicy,
     /// 日志禁项。
@@ -218,6 +285,8 @@ fn parse_contract(value: &Value, path: &Path) -> Result<LinkContract, MeitoError
     let package_limit = parse_package_limit(root, path)?;
     let get_semantics = parse_get_semantics(root, path)?;
     let rate_limit = parse_rate_limit(root, path)?;
+    let auth_header = parse_auth_header(root, path)?;
+    let operations = parse_operations(root, path)?;
     let http_status = parse_http_status(root, path)?;
     let logging = parse_logging(root, path)?;
 
@@ -231,6 +300,8 @@ fn parse_contract(value: &Value, path: &Path) -> Result<LinkContract, MeitoError
         package_limit,
         get_semantics,
         rate_limit,
+        auth_header,
+        operations,
         http_status,
         logging,
     })
@@ -566,6 +637,159 @@ fn parse_rate_limit(root: &Map<String, Value>, path: &Path) -> Result<RateLimitP
     })
 }
 
+/// 校验鉴权头策略。
+///
+/// # 参数
+/// - `root`: 契约根对象。
+/// - `path`: 仅用于错误信息。
+///
+/// # 错误
+/// 头名称或方案为空，或 `appliesTo` 缺少 PUT/GET/DELETE 时返回 `E_CONFIG`。
+fn parse_auth_header(
+    root: &Map<String, Value>,
+    path: &Path,
+) -> Result<AuthHeaderPolicy, MeitoError> {
+    let object = require_object_field(root, "authHeader", "authHeader", path)?;
+    let name = require_str(object, "name", "authHeader.name", path)?;
+    let scheme = require_str(object, "scheme", "authHeader.scheme", path)?;
+    if name.trim().is_empty() || scheme.trim().is_empty() {
+        return Err(config_error(path, "authHeader 的 name 与 scheme 不得为空"));
+    }
+    let applies_to = require_string_array(object, "appliesTo", "authHeader.appliesTo", path)?;
+    for operation in ["put", "get", "delete"] {
+        if !applies_to.iter().any(|item| item == operation) {
+            return Err(config_error(
+                path,
+                format!("authHeader.appliesTo 缺少 {operation}"),
+            ));
+        }
+    }
+    Ok(AuthHeaderPolicy {
+        name: name.to_string(),
+        scheme: scheme.to_string(),
+        applies_to,
+    })
+}
+
+/// 校验操作清单与重复注册语义。
+///
+/// # 参数
+/// - `root`: 契约根对象。
+/// - `path`: 仅用于错误信息。
+///
+/// # 错误
+/// 方法、鉴权角色或重复注册键与冻结语义不一致时返回 `E_CONFIG`。
+fn parse_operations(
+    root: &Map<String, Value>,
+    path: &Path,
+) -> Result<OperationsPolicy, MeitoError> {
+    let object = require_object_field(root, "operations", "operations", path)?;
+    let register_object = require_object_field(object, "register", "operations.register", path)?;
+    let method = require_str(
+        register_object,
+        "method",
+        "operations.register.method",
+        path,
+    )?;
+    if method != "POST" {
+        return Err(config_error(
+            path,
+            format!("operations.register.method 只接受 POST，收到 {method}"),
+        ));
+    }
+    let auth_text = require_str(register_object, "auth", "operations.register.auth", path)?;
+    let auth = parse_operation_auth(auth_text, "operations.register.auth", path)?;
+    if auth != OperationAuth::None {
+        return Err(config_error(path, "operations.register.auth 必须为 none"));
+    }
+    let duplicate_live_channel = require_str(
+        register_object,
+        "duplicateLiveChannel",
+        "operations.register.duplicateLiveChannel",
+        path,
+    )?;
+    if duplicate_live_channel != "duplicate_channel" {
+        return Err(config_error(
+            path,
+            "operations.register.duplicateLiveChannel 必须为 duplicate_channel",
+        ));
+    }
+    Ok(OperationsPolicy {
+        register: OperationPolicy {
+            method: method.to_string(),
+            auth,
+        },
+        put: parse_operation(object, "put", "PUT", OperationAuth::WriteToken, path)?,
+        get: parse_operation(object, "get", "GET", OperationAuth::ReadToken, path)?,
+        delete: parse_operation(object, "delete", "DELETE", OperationAuth::WriteToken, path)?,
+        duplicate_live_channel: duplicate_live_channel.to_string(),
+    })
+}
+
+/// 校验单个操作的方法与鉴权角色。
+///
+/// # 参数
+/// - `operations`: 契约 `operations` 对象。
+/// - `key`: 操作名。
+/// - `expected_method`: 该操作必须使用的方法。
+/// - `expected_auth`: 该操作必须使用的鉴权角色。
+/// - `path`: 仅用于错误信息。
+///
+/// # 错误
+/// 方法或鉴权角色与冻结语义不一致时返回 `E_CONFIG`。
+fn parse_operation(
+    operations: &Map<String, Value>,
+    key: &str,
+    expected_method: &str,
+    expected_auth: OperationAuth,
+    path: &Path,
+) -> Result<OperationPolicy, MeitoError> {
+    let name = format!("operations.{key}");
+    let object = require_object_field(operations, key, &name, path)?;
+    let method_name = format!("{name}.method");
+    let method = require_str(object, "method", &method_name, path)?;
+    if method != expected_method {
+        return Err(config_error(
+            path,
+            format!("{method_name} 只接受 {expected_method}，收到 {method}"),
+        ));
+    }
+    let auth_name = format!("{name}.auth");
+    let auth_text = require_str(object, "auth", &auth_name, path)?;
+    let auth = parse_operation_auth(auth_text, &auth_name, path)?;
+    if auth != expected_auth {
+        return Err(config_error(
+            path,
+            format!("{auth_name} 与冻结的鉴权角色不一致"),
+        ));
+    }
+    Ok(OperationPolicy {
+        method: method.to_string(),
+        auth,
+    })
+}
+
+/// 把契约字符串转换为鉴权角色。
+///
+/// # 参数
+/// - `value`: `none`、`read_token` 或 `write_token`。
+/// - `name`: 字段全名，用于错误信息。
+/// - `path`: 仅用于错误信息。
+///
+/// # 错误
+/// 未知角色返回 `E_CONFIG`。
+fn parse_operation_auth(value: &str, name: &str, path: &Path) -> Result<OperationAuth, MeitoError> {
+    match value {
+        "none" => Ok(OperationAuth::None),
+        "read_token" => Ok(OperationAuth::ReadToken),
+        "write_token" => Ok(OperationAuth::WriteToken),
+        _ => Err(config_error(
+            path,
+            format!("{name} 只接受 none/read_token/write_token，收到 {value}"),
+        )),
+    }
+}
+
 /// 校验 HTTP 状态码映射。
 ///
 /// # 参数
@@ -580,6 +804,13 @@ fn parse_http_status(
 ) -> Result<HttpStatusPolicy, MeitoError> {
     let object = require_object_field(root, "httpStatusMap", "httpStatusMap", path)?;
     Ok(HttpStatusPolicy {
+        success: require_status(object, "success", "httpStatusMap.success", path)?,
+        duplicate_channel: require_status(
+            object,
+            "duplicate_channel",
+            "httpStatusMap.duplicate_channel",
+            path,
+        )?,
         bad_token: require_status(object, "bad_token", "httpStatusMap.bad_token", path)?,
         unknown_channel: require_status(
             object,

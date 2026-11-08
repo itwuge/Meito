@@ -17,8 +17,9 @@ mod store;
 pub use access_log::{append_access_log, record_to_value, AccessLogRecord, ACCESS_LOG_FILENAME};
 pub use auth::{constant_time_eq, is_sha256_hex, token_hash, verify_token};
 pub use contract::{
-    load_link_contract, ChannelIdPolicy, GetSemanticsPolicy, HttpStatusPolicy, LinkContract,
-    LoggingPolicy, PackageLimitPolicy, RateLimitPolicy, RegisterPayloadPolicy, TokenHashPolicy,
+    load_link_contract, AuthHeaderPolicy, ChannelIdPolicy, GetSemanticsPolicy, HttpStatusPolicy,
+    LinkContract, LoggingPolicy, OperationAuth, OperationPolicy, OperationsPolicy,
+    PackageLimitPolicy, RateLimitPolicy, RegisterPayloadPolicy, TokenHashPolicy,
     TokenIssuancePolicy, LINK_CONTRACT_PATH,
 };
 pub use rate_limit::RateLimiter;

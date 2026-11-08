@@ -1,7 +1,7 @@
 //! HTTP 服务用例：token 分离、状态码映射、限流、最大读取次数与访问日志禁项。
 //!
 //! 所有期望状态码、单包上限、突发容量与最大读取次数都从 `contracts/link.json` 读取；
-//! 需要放宽限流时也以契约为基准改写临时副本，不在用例里写死数值。
+//! 需要放宽限流或验证「代码确实读契约」时，以契约为基准改写临时副本，不在用例里写死数值。
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -37,14 +37,12 @@ fn temp_dir(name: &str) -> PathBuf {
     path
 }
 
-/// 以契约为基准放宽突发容量，确保最大读取次数用例不被限流提前截断。
-fn relaxed_contract() -> LinkContract {
-    let base = load_link_contract(&repo_contract_path()).unwrap();
-    let directory = temp_dir("relaxed");
+/// 以契约为基准改写临时副本；引用文件一并复制，保证加载器可解析引用。
+fn rewrite_contract(name: &str, mutator: impl FnOnce(&mut Value)) -> PathBuf {
+    let directory = temp_dir(name);
     let mut link: Value =
         serde_json::from_str(&fs::read_to_string(repo_contract_path()).unwrap()).unwrap();
-    let burst = base.rate_limit.burst + base.get_semantics.max_reads as u64 + 1;
-    link["rateLimit"]["burst"] = json!(burst);
+    mutator(&mut link);
     fs::write(
         directory.join("link.json"),
         serde_json::to_string_pretty(&link).unwrap(),
@@ -55,7 +53,17 @@ fn relaxed_contract() -> LinkContract {
         directory.join("connection-package.json"),
     )
     .unwrap();
-    load_link_contract(&directory.join("link.json")).unwrap()
+    directory.join("link.json")
+}
+
+/// 以契约为基准放宽突发容量，确保最大读取次数用例不被限流提前截断。
+fn relaxed_contract() -> LinkContract {
+    let base = load_link_contract(&repo_contract_path()).unwrap();
+    let burst = base.rate_limit.burst + base.get_semantics.max_reads as u64 + 1;
+    let path = rewrite_contract("relaxed", |link| {
+        link["rateLimit"]["burst"] = json!(burst);
+    });
+    load_link_contract(&path).unwrap()
 }
 
 struct HttpResponse {
@@ -94,7 +102,32 @@ impl TestServer {
     }
 
     fn request(&self, method: &str, path: &str, token: Option<&str>, body: &[u8]) -> HttpResponse {
-        send(self.address, method, path, token, body)
+        let name = self.contract.auth_header.name.as_str();
+        let scheme = self.contract.auth_header.scheme.as_str();
+        send(
+            self.address,
+            method,
+            path,
+            token.map(|token| (name, scheme, token)),
+            body,
+        )
+    }
+
+    fn request_with_scheme(
+        &self,
+        method: &str,
+        path: &str,
+        token: &str,
+        scheme: &str,
+        body: &[u8],
+    ) -> HttpResponse {
+        send(
+            self.address,
+            method,
+            path,
+            Some((self.contract.auth_header.name.as_str(), scheme, token)),
+            body,
+        )
     }
 
     fn send_headers_only(
@@ -109,7 +142,10 @@ impl TestServer {
             "{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {content_length}\r\nConnection: close\r\n"
         );
         if let Some(token) = token {
-            text.push_str(&format!("Authorization: Bearer {token}\r\n"));
+            text.push_str(&format!(
+                "{}: {} {token}\r\n",
+                self.contract.auth_header.name, self.contract.auth_header.scheme
+            ));
         }
         text.push_str("\r\n");
         let _ = stream.write_all(text.as_bytes());
@@ -130,13 +166,17 @@ impl TestServer {
     fn blob_path(channel_id: &str) -> String {
         format!("/v1/channels/{channel_id}/blob")
     }
+
+    fn success(&self) -> u16 {
+        self.contract.http_status.success
+    }
 }
 
 fn send(
     address: SocketAddr,
     method: &str,
     path: &str,
-    token: Option<&str>,
+    auth: Option<(&str, &str, &str)>,
     body: &[u8],
 ) -> HttpResponse {
     let mut stream = TcpStream::connect(address).unwrap();
@@ -144,8 +184,8 @@ fn send(
         "{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n",
         body.len()
     );
-    if let Some(token) = token {
-        text.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    if let Some((name, scheme, token)) = auth {
+        text.push_str(&format!("{name}: {scheme} {token}\r\n"));
     }
     text.push_str("\r\n");
     let mut bytes = text.into_bytes();
@@ -187,7 +227,7 @@ fn register_put_get_delete_roundtrip() {
     let channel = "roundtrip-channel";
     assert_eq!(
         server.register(channel, "read-token", "write-token").status,
-        200
+        server.success()
     );
     let payload = b"meito-ciphertext-payload".to_vec();
     let path = TestServer::blob_path(channel);
@@ -195,10 +235,10 @@ fn register_put_get_delete_roundtrip() {
         server
             .request("PUT", &path, Some("write-token"), &payload)
             .status,
-        200
+        server.success()
     );
     let fetched = server.request("GET", &path, Some("read-token"), &[]);
-    assert_eq!(fetched.status, 200);
+    assert_eq!(fetched.status, server.success());
     assert_eq!(fetched.body, payload, "GET 必须原样返回密文");
     assert_eq!(
         server
@@ -209,11 +249,25 @@ fn register_put_get_delete_roundtrip() {
                 &[]
             )
             .status,
-        200
+        server.success()
     );
     assert_eq!(
         server.request("GET", &path, Some("read-token"), &[]).status,
         server.contract.http_status.unknown_channel
+    );
+}
+
+#[test]
+fn duplicate_registration_uses_contract_status() {
+    let server = TestServer::start(load_link_contract(&repo_contract_path()).unwrap());
+    let channel = "duplicate-channel";
+    assert_eq!(
+        server.register(channel, "read-token", "write-token").status,
+        server.success()
+    );
+    assert_eq!(
+        server.register(channel, "read-token", "write-token").status,
+        server.contract.http_status.duplicate_channel
     );
 }
 
@@ -225,7 +279,7 @@ fn read_and_write_tokens_are_enforced_separately() {
     let channel = "token-channel";
     assert_eq!(
         server.register(channel, "read-token", "write-token").status,
-        200
+        server.success()
     );
     let path = TestServer::blob_path(channel);
     let payload = b"ciphertext".to_vec();
@@ -246,7 +300,7 @@ fn read_and_write_tokens_are_enforced_separately() {
         server
             .request("PUT", &path, Some("write-token"), &payload)
             .status,
-        200
+        server.success()
     );
     assert_eq!(
         server
@@ -257,7 +311,59 @@ fn read_and_write_tokens_are_enforced_separately() {
     );
     assert_eq!(
         server.request("GET", &path, Some("read-token"), &[]).status,
-        200
+        server.success()
+    );
+}
+
+#[test]
+fn delete_requires_write_token() {
+    let server = TestServer::start(load_link_contract(&repo_contract_path()).unwrap());
+    let channel = "delete-token-channel";
+    assert_eq!(
+        server.register(channel, "read-token", "write-token").status,
+        server.success()
+    );
+    let path = TestServer::blob_path(channel);
+    assert_eq!(
+        server
+            .request("PUT", &path, Some("write-token"), b"ciphertext")
+            .status,
+        server.success()
+    );
+    let delete_path = format!("/v1/channels/{channel}");
+    assert_eq!(
+        server
+            .request("DELETE", &delete_path, Some("read-token"), &[])
+            .status,
+        server.contract.http_status.bad_token,
+        "DELETE 不得接受读 token"
+    );
+    assert_eq!(
+        server
+            .request("DELETE", &delete_path, Some("write-token"), &[])
+            .status,
+        server.success()
+    );
+    assert_eq!(
+        server.request("GET", &path, Some("read-token"), &[]).status,
+        server.contract.http_status.unknown_channel
+    );
+}
+
+#[test]
+fn auth_header_scheme_must_match_contract() {
+    let server = TestServer::start(load_link_contract(&repo_contract_path()).unwrap());
+    let channel = "scheme-channel";
+    assert_eq!(
+        server.register(channel, "read-token", "write-token").status,
+        server.success()
+    );
+    let path = TestServer::blob_path(channel);
+    assert_eq!(
+        server
+            .request_with_scheme("PUT", &path, "write-token", "Basic", b"ciphertext")
+            .status,
+        server.contract.http_status.bad_token
     );
 }
 
@@ -291,7 +397,7 @@ fn oversized_body_maps_to_contract_status() {
     let channel = "large-channel";
     assert_eq!(
         server.register(channel, "read-token", "write-token").status,
-        200
+        server.success()
     );
     let path = TestServer::blob_path(channel);
     let oversized = server.contract.package_limit.max_ciphertext_bytes + 1;
@@ -356,25 +462,60 @@ fn max_reads_is_enforced_after_contract_limit() {
     let channel = "max-reads-channel";
     assert_eq!(
         server.register(channel, "read-token", "write-token").status,
-        200
+        server.success()
     );
     let path = TestServer::blob_path(channel);
     assert_eq!(
         server
             .request("PUT", &path, Some("write-token"), b"ciphertext")
             .status,
-        200
+        server.success()
     );
     for _ in 0..server.contract.get_semantics.max_reads {
         assert_eq!(
             server.request("GET", &path, Some("read-token"), &[]).status,
-            200
+            server.success()
         );
     }
     assert_eq!(
         server.request("GET", &path, Some("read-token"), &[]).status,
         server.contract.http_status.rate_limited
     );
+}
+
+// ===== 契约跟随 =====
+
+#[test]
+fn status_and_auth_header_follow_contract_values() {
+    let base = load_link_contract(&repo_contract_path()).unwrap();
+    let new_success = base.http_status.success + 1;
+    let new_duplicate = base.http_status.duplicate_channel + 9;
+    let path = rewrite_contract("follow-status", |link| {
+        link["httpStatusMap"]["success"] = json!(new_success);
+        link["httpStatusMap"]["duplicate_channel"] = json!(new_duplicate);
+        link["authHeader"]["name"] = json!("X-Meito-Token");
+        link["authHeader"]["scheme"] = json!("Meito");
+    });
+    let server = TestServer::start(load_link_contract(&path).unwrap());
+    let channel = "follow-channel";
+    let registration = server.register(channel, "read-token", "write-token");
+    assert_eq!(registration.status, new_success);
+    assert_eq!(
+        server.register(channel, "read-token", "write-token").status,
+        new_duplicate
+    );
+
+    let blob_path = TestServer::blob_path(channel);
+    let put = server.request("PUT", &blob_path, Some("write-token"), b"ciphertext");
+    assert_eq!(put.status, new_success);
+    let wrong_header = send(
+        server.address,
+        "GET",
+        &blob_path,
+        Some(("Authorization", "Bearer", "read-token")),
+        &[],
+    );
+    assert_eq!(wrong_header.status, base.http_status.bad_token);
 }
 
 // ===== 访问日志 =====
@@ -386,18 +527,18 @@ fn access_log_only_records_allowed_fields() {
     let sentinel = b"MEITO-TEST-BLOB-SENTINEL";
     assert_eq!(
         server.register(channel, "read-token", "write-token").status,
-        200
+        server.success()
     );
     let path = TestServer::blob_path(channel);
     assert_eq!(
         server
             .request("PUT", &path, Some("write-token"), sentinel)
             .status,
-        200
+        server.success()
     );
     assert_eq!(
         server.request("GET", &path, Some("read-token"), &[]).status,
-        200
+        server.success()
     );
 
     let text = fs::read_to_string(&server.log_path).unwrap();
