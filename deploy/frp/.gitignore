@@ -1,0 +1,7 @@
+# 本目录只保存可公开的部署配置与文档。
+# 任何真实 token、临时 token、备份 token 都不得入库。
+secrets/
+*.token
+*.token.new
+*.token.bak
+*.token.bak-*

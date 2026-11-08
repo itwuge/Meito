@@ -1,0 +1,90 @@
+# =============================================================================
+# Meito 打洞协调节点 —— systemd 服务单元
+#
+# 安装位置：/etc/systemd/system/frps.service
+# 适用系统：Ubuntu 20.04（systemd 245）
+#
+# 设计要点：
+#   1. 非 root 运行（专用 frps 系统用户），只用 7000 端口，不需要任何 capability。
+#   2. 进程异常退出自动重启；连续失败触发 start limit，避免无限崩溃循环。
+#   3. 日志交给 journald；落盘位置 /var/log/journal，容量上限见
+#      journald-frps-cap.conf（默认 256 MiB）。
+#   4. 权限收敛：只读系统目录、私有 /tmp、无新权限、无设备访问。
+# =============================================================================
+
+[Unit]
+Description=Meito frps XTCP coordination node (no relay)
+Documentation=file:///etc/frp/frps.toml
+# frp 需要可用的网络才能监听；等待 network-online，避免开机时与云网络初始化竞争。
+After=network-online.target
+Wants=network-online.target
+# 60 秒内最多启动 5 次。超过后进入 failed，避免配置错误导致无限重启。
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# 专用系统用户，由安装步骤创建；不允许登录，不创建 home。
+User=frps
+Group=frps
+
+# frp 运行时不写业务数据；StateDirectory 由 systemd 创建并只授予该服务写权限。
+StateDirectory=frps
+StateDirectoryMode=0750
+WorkingDirectory=/var/lib/frps
+
+ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
+
+# 自动重启。正常停止（systemctl stop）不触发；崩溃/被杀后 5 秒重启。
+Restart=always
+RestartSec=5
+
+# 停止时先 SIGTERM，给 frps 清理监听与连接的时间；超时再强杀。
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# 提高文件描述符上限，避免大量 frpc 连接时触顶。
+LimitNOFILE=65536
+UMask=0027
+
+# ===== 日志 =====
+# frps.toml 中 log.to=console，因此 stdout/stderr 就是日志出口。
+# journald 持久化到 /var/log/journal；SystemMaxUse 等上限在 drop-in 中配置。
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=frps
+# 限制单位时间日志量，防止异常刷屏拖垮 journald/磁盘；正常协调流量远低于此。
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
+
+# ===== 权限收敛 =====
+# 不获取新权限；清空 capability 集合（7000 无需特权端口）。
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# /tmp 与 /dev 私有化；frps 不需要访问宿主机设备。
+PrivateTmp=true
+PrivateDevices=true
+
+# 系统目录只读；/etc/frp 配置与 /usr/local/bin/frps 都不可被进程改写。
+# StateDirectory 自动提供 /var/lib/frps 的可写例外。
+ProtectSystem=strict
+ProtectHome=true
+
+# 禁止改动内核参数、加载模块、访问控制组。
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# 只允许 IPv4/IPv6 与 UNIX socket。保留 AF_UNIX 是为了避免 glibc/NSS
+# 在解析或系统集成时因为缺少该地址族而异常；frps 本身不监听 UNIX socket。
+# 其他地址族（如 AF_NETLINK、AF_PACKET）一律禁止。
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
