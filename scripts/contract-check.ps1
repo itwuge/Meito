@@ -323,7 +323,7 @@ if ($null -ne $lockSchema) {
     }
 }
 
-# ===== 协调服务 link.json（0.3.0 新增） =====
+# ===== 协调服务 link.json（0.3.x） =====
 $link = Load-Json "contracts/link.json"
 if ($null -ne $link) {
     if ([int]$link.channelTtlSeconds -ne 7200) { Fail "CONTRACT_LINK_TTL" "通道 TTL 必须为 7200 秒" }
@@ -347,6 +347,8 @@ if ($null -ne $link) {
         Fail "CONTRACT_LINK_RATE" "限流必须为每通道 60/分、每 IP 120/分、突发 10"
     }
     $expectedStatus = @{
+        success = 200
+        duplicate_channel = 400
         bad_token = 403
         unknown_channel = 404
         too_large = 413
@@ -359,6 +361,32 @@ if ($null -ne $link) {
         if ([int]$link.httpStatusMap.$key -ne [int]$expectedStatus[$key]) {
             Fail "CONTRACT_LINK_STATUS" "httpStatusMap.$key 必须为 $($expectedStatus[$key])"
         }
+    }
+    $expectedOps = @{
+        register = @{ method = "POST"; auth = "none" }
+        put = @{ method = "PUT"; auth = "write_token" }
+        get = @{ method = "GET"; auth = "read_token" }
+        delete = @{ method = "DELETE"; auth = "write_token" }
+    }
+    foreach ($name in $expectedOps.Keys) {
+        if ([string]$link.operations.$name.method -ne $expectedOps[$name].method -or [string]$link.operations.$name.auth -ne $expectedOps[$name].auth) {
+            Fail "CONTRACT_LINK_HTTP" "operations.$name 必须为 $($expectedOps[$name].method) / $($expectedOps[$name].auth)"
+        }
+        if ($link.operations.$name.PSObject.Properties.Name -contains "successStatus" -or $link.operations.$name.PSObject.Properties.Name -contains "status") {
+            Fail "CONTRACT_LINK_HTTP" "operations.$name 不得复写状态码，必须引用 httpStatusMap"
+        }
+    }
+    if ([string]$link.operations.delete.auth -ne "write_token") {
+        Fail "CONTRACT_LINK_HTTP" "DELETE 必须用写 token 鉴权"
+    }
+    if ([string]$link.operations.register.duplicateLiveChannel -ne "duplicate_channel") {
+        Fail "CONTRACT_LINK_HTTP" "重复注册必须引用 duplicate_channel（400）"
+    }
+    if ([string]$link.authHeader.name -ne "Authorization" -or [string]$link.authHeader.scheme -ne "Bearer" -or [string]$link.authHeader.format -ne "Authorization: Bearer <token>") {
+        Fail "CONTRACT_LINK_HTTP" "鉴权头必须为 Authorization: Bearer <token>"
+    }
+    if ((@($link.authHeader.appliesTo) -join ",") -ne "put,get,delete") {
+        Fail "CONTRACT_LINK_HTTP" "鉴权头必须作用于 put/get/delete"
     }
     if ($link.logging.onlyAllowedFields -ne $true) { Fail "CONTRACT_LINK_LOG" "logging.onlyAllowedFields 必须为 true" }
     foreach ($f in @("channel_id", "size", "status")) {
@@ -435,11 +463,95 @@ foreach ($shell in @("meito-cli", "meito-web", "meito-runner", "meito-link")) {
     }
 }
 
+# ===== 文档数值必须回溯到契约（通用规则） =====
+function Add-ContractNumbers($value, $set) {
+    if ($null -eq $value) { return }
+    if ($value -is [bool]) { return }
+    if ($value -is [string]) {
+        if ($value -match '^\d+$') { $set[([string][int]$value)] = $true }
+        return
+    }
+    if ($value -is [int] -or $value -is [long] -or $value -is [double] -or $value -is [decimal]) {
+        $set[([string][int]$value)] = $true
+        return
+    }
+    if ($value -is [System.Collections.IEnumerable]) {
+        foreach ($item in $value) { Add-ContractNumbers $item $set }
+        return
+    }
+    foreach ($prop in $value.PSObject.Properties) { Add-ContractNumbers $prop.Value $set }
+}
+
+function Get-DocSection([string]$path, [string]$startPattern, [string]$endPattern) {
+    if (-not (Test-Path -LiteralPath $path)) { return "" }
+    $lines = (Get-Content -LiteralPath $path -Raw -Encoding UTF8) -split '\r?\n'
+    $inside = $false
+    $buffer = @()
+    foreach ($line in $lines) {
+        if (-not $inside -and $line -match $startPattern) { $inside = $true; continue }
+        if ($inside -and $line -match $endPattern) { break }
+        if ($inside) { $buffer += $line }
+    }
+    return ($buffer -join "`n")
+}
+
+$contractNumbers = @{}
+foreach ($contractFile in (Get-ChildItem -Path "contracts" -File -Filter *.json)) {
+    try {
+        Add-ContractNumbers (Get-Content -LiteralPath $contractFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json) $contractNumbers
+    } catch {
+        Fail "CONTRACT_DOC_NUMERIC" "$($contractFile.Name) 不是合法 JSON"
+    }
+}
+
+$docSections = @(
+    @{ File = "docs/design.md"; Start = "^###\s+5\.7\s"; End = "^###\s+5\.8\s" },
+    @{ File = "docs/design.md"; Start = "^###\s+10\.7\s"; End = "^##\s+11\." },
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.2\s"; End = "^##\s+5\.3\s" },
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.3\s"; End = "^##\s+6\." }
+)
+foreach ($section in $docSections) {
+    $body = Get-DocSection $section.File $section.Start $section.End
+    if ([string]::IsNullOrWhiteSpace($body)) {
+        Fail "CONTRACT_DOC_NUMERIC" "无法定位文档段落：$($section.File) $($section.Start)"
+        continue
+    }
+    foreach ($m in [regex]::Matches($body, '(\d+)`?\s*(秒|分钟|小时|次|字节|端口)')) {
+        $raw = [int]$m.Groups[1].Value
+        $seconds = $null
+        switch ($m.Groups[2].Value) {
+            "秒" { $seconds = $raw }
+            "分钟" { $seconds = $raw * 60 }
+            "小时" { $seconds = $raw * 3600 }
+        }
+        if ($null -ne $seconds) {
+            if (-not $contractNumbers.ContainsKey([string]$seconds) -and -not $contractNumbers.ContainsKey([string]$raw)) {
+                Fail "CONTRACT_DOC_NUMERIC" "$($section.File) 的 $($m.Value) 在 contracts 中无对应字段"
+            }
+        } elseif (-not $contractNumbers.ContainsKey([string]$raw)) {
+            Fail "CONTRACT_DOC_NUMERIC" "$($section.File) 的 $($m.Value) 在 contracts 中无对应字段"
+        }
+    }
+    foreach ($m in [regex]::Matches($body, '`(4\d\d|5\d\d)`')) {
+        $code = $m.Groups[1].Value
+        if (-not $contractNumbers.ContainsKey($code)) {
+            Fail "CONTRACT_DOC_NUMERIC" "$($section.File) 的状态码 $code 在 contracts 中无对应字段"
+        }
+    }
+}
+
+$linkDoc = Get-DocSection "docs/design.md" "^###\s+5\.7\s" "^###\s+5\.8\s"
+foreach ($needle in @('Authorization: Bearer <token>', '读 token 只用于 `GET`', '写 token 用于 `PUT` 与 `DELETE`', '重复注册返回 `400`', '成功响应统一 `200`')) {
+    if ($linkDoc -notmatch [regex]::Escape($needle)) {
+        Fail "CONTRACT_LINK_DOC" "design §5.7 缺少：$needle"
+    }
+}
+
 if ($failures.Count -gt 0) {
     Write-Host "FAIL: contract-check" -ForegroundColor Red
     $failures | ForEach-Object { Write-Host " - $_" -ForegroundColor Red }
     exit 1
 }
 
-Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义一致）" -ForegroundColor Green
+Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义一致；文档数值可回溯契约）" -ForegroundColor Green
 exit 0

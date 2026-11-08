@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.0",
+  "contractVersion": "0.3.1",
   "template": "templates/meito-session.yml",
   "trigger": "workflow_dispatch",
   "permissions": {
