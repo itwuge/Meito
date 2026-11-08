@@ -85,7 +85,7 @@ pub fn route(method: &str, path: &str, max_channel_id_len: usize) -> Route {
 ///
 /// # 错误
 /// 不返回错误；非法返回 `false`。
-fn is_valid_channel_id(channel_id: &str, max_len: usize) -> bool {
+pub fn is_valid_channel_id(channel_id: &str, max_len: usize) -> bool {
     !channel_id.is_empty()
         && channel_id.len() <= max_len
         && channel_id

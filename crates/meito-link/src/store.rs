@@ -34,7 +34,7 @@ impl ChannelPolicy {
     pub fn from_contract(contract: &LinkContract) -> Self {
         Self {
             ttl: Duration::from_secs(contract.channel_ttl_seconds),
-            max_ciphertext_bytes: contract.max_ciphertext_bytes,
+            max_ciphertext_bytes: contract.package_limit.max_ciphertext_bytes,
             max_reads: contract.get_semantics.max_reads,
         }
     }
@@ -135,19 +135,21 @@ pub trait ChannelStore: Send + Sync {
     ///
     /// # 参数
     /// - `channel_id`: 通道 id。
+    /// - `now`: 当前时刻；已过期通道按不存在处理。
     ///
     /// # 错误
-    /// 通道不存在返回 `NotFound`。
-    fn delete(&self, channel_id: &str) -> Result<(), StoreError>;
+    /// 通道不存在或已过期返回 `NotFound`。
+    fn delete(&self, channel_id: &str, now: SystemTime) -> Result<(), StoreError>;
 
     /// 返回通道的 token 哈希与公钥，供服务层校验请求 token。
     ///
     /// # 参数
     /// - `channel_id`: 通道 id。
+    /// - `now`: 当前时刻；已过期通道不得再返回校验材料。
     ///
     /// # 错误
-    /// 不返回错误；通道不存在返回 `None`。
-    fn credentials(&self, channel_id: &str) -> Option<ChannelCredentials>;
+    /// 不返回错误；通道不存在或已过期返回 `None`。
+    fn credentials(&self, channel_id: &str, now: SystemTime) -> Option<ChannelCredentials>;
 
     /// 清理所有已过期通道。
     ///
@@ -283,19 +285,30 @@ impl ChannelStore for InMemoryChannelStore {
         })
     }
 
-    fn delete(&self, channel_id: &str) -> Result<(), StoreError> {
-        match self.lock().remove(channel_id) {
-            Some(_) => Ok(()),
+    fn delete(&self, channel_id: &str, now: SystemTime) -> Result<(), StoreError> {
+        let mut channels = self.lock();
+        match channels.get(channel_id) {
             None => Err(StoreError::NotFound),
+            Some(state) if now >= state.expires_at => {
+                channels.remove(channel_id);
+                Err(StoreError::NotFound)
+            }
+            Some(_) => {
+                channels.remove(channel_id);
+                Ok(())
+            }
         }
     }
 
-    fn credentials(&self, channel_id: &str) -> Option<ChannelCredentials> {
-        self.lock().get(channel_id).map(|state| ChannelCredentials {
-            read_token_hash: state.read_token_hash.clone(),
-            write_token_hash: state.write_token_hash.clone(),
-            public_key: state.public_key.clone(),
-        })
+    fn credentials(&self, channel_id: &str, now: SystemTime) -> Option<ChannelCredentials> {
+        self.lock()
+            .get(channel_id)
+            .filter(|state| now < state.expires_at)
+            .map(|state| ChannelCredentials {
+                read_token_hash: state.read_token_hash.clone(),
+                write_token_hash: state.write_token_hash.clone(),
+                public_key: state.public_key.clone(),
+            })
     }
 
     fn purge_expired(&self, now: SystemTime) -> usize {
