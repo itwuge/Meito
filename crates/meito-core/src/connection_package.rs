@@ -1,8 +1,9 @@
 //! File: 连接包封装、解封与每作业密钥（contracts/connection-package.json）。
 //!
 //! 线格式、算法、magic、格式版本、布局偏移与单包上限全部从契约读取，代码不另写数值。
-//! 私钥只存在于进程内，随 `StaticSecret` 离开作用域清零，不导出、不记录；明文只交给
-//! 调用方，本模块不解析业务字段。
+//! 私钥只存在于进程内，随 `StaticSecret` 离开作用域清零，不导出、不记录；派生出的共享
+//! 密钥副本用 `Zeroizing` 包裹。清零是尽力而为，不承诺抵御内存取证。明文只交给调用方，
+//! 本模块不解析业务字段。
 
 use std::fs;
 use std::path::Path;
@@ -13,6 +14,7 @@ use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use serde_json::{Map, Value};
 use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
+use zeroize::Zeroizing;
 
 use crate::error::{ErrorCode, MeitoError};
 
@@ -614,7 +616,8 @@ pub fn seal_connection_package(
     let ephemeral = EphemeralSecret::random_from_rng(OsRng);
     let ephemeral_public = PublicKey::from(&ephemeral);
     let shared = ephemeral.diffie_hellman(&PublicKey::from(*recipient_public));
-    let cipher = XChaCha20Poly1305::new_from_slice(&shared.to_bytes())
+    let shared_bytes = Zeroizing::new(shared.to_bytes());
+    let cipher = XChaCha20Poly1305::new_from_slice(&*shared_bytes)
         .map_err(|error| crypto_error(format!("初始化 XChaCha20-Poly1305 失败：{error}")))?;
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
     let ciphertext = cipher
@@ -711,7 +714,8 @@ pub fn open_connection_package(
         layout.nonce_len,
     )?;
     let shared = keypair.secret.diffie_hellman(&PublicKey::from(public_key));
-    let cipher = XChaCha20Poly1305::new_from_slice(&shared.to_bytes())
+    let shared_bytes = Zeroizing::new(shared.to_bytes());
+    let cipher = XChaCha20Poly1305::new_from_slice(&*shared_bytes)
         .map_err(|error| crypto_error(format!("初始化 XChaCha20-Poly1305 失败：{error}")))?;
     let plaintext = cipher
         .decrypt(XNonce::from_slice(&nonce), ciphertext)
