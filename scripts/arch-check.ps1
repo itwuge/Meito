@@ -90,6 +90,46 @@ if ($coreFiles) {
 }
 Add-Check "Rust 文件头"
 
+# 检查 7：协调服务日志禁止出现 blob 与任何摘要（契约 contracts/link.json）
+$linkContract = $null
+if (Test-Path -LiteralPath "$root\contracts\link.json") {
+    try {
+        $linkContract = Get-Content -LiteralPath "$root\contracts\link.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Add-Failure "ARCH_LINK_LOG" "contracts/link.json 不是合法 JSON"
+    }
+}
+if ($null -eq $linkContract) {
+    Add-Failure "ARCH_LINK_LOG" "缺少 contracts/link.json，无法判定服务端日志禁项"
+} else {
+    $forbidden = @($linkContract.logging.forbiddenContent)
+    foreach ($word in @("blob", "digest", "hash")) {
+        if ($forbidden -notcontains $word) {
+            Add-Failure "ARCH_LINK_LOG" "logging.forbiddenContent 缺少 $word，日志禁项不完整"
+        }
+    }
+    $linkSrc = "$root\crates\meito-link\src"
+    if (Test-Path $linkSrc) {
+        Get-ChildItem -Path $linkSrc -Recurse -File -Filter *.rs -ErrorAction SilentlyContinue | ForEach-Object {
+            $file = $_.FullName
+            $lineNo = 0
+            Get-Content -LiteralPath $file -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object {
+                $line = $_
+                $lineNo++
+                # 只检查日志宏所在行，避免把路由路径 /v1/channels/{id}/blob 或在内存中计算哈希误判。
+                if ($line -match "(?i)(tracing::)?(trace|debug|info|warn|error)!|println!|eprintln!|print!") {
+                    foreach ($word in $forbidden) {
+                        if ($line -match ("(?i)" + [regex]::Escape([string]$word))) {
+                            Add-Failure "ARCH_LINK_LOG" "${file}:$lineNo 日志行出现禁止项 $word"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+Add-Check "协调服务日志不含 blob/摘要"
+
 if ($failures.Count -gt 0) {
     Write-Host "FAIL: arch-check" -ForegroundColor Red
     $failures | ForEach-Object { Write-Host " - $_" -ForegroundColor Red }

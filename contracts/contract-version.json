@@ -1,10 +1,16 @@
 {
-  "contractVersion": "0.2.0",
+  "contractVersion": "0.3.0",
   "status": "frozen",
   "frozenAt": "2026-11-08",
   "project": "meito",
-  "supersedes": "0.1.0",
+  "supersedes": "0.2.0",
   "revisions": [
+    {
+      "version": "0.3.0",
+      "date": "2026-11-08",
+      "reason": "M3 开发线实现 meito-link HTTP 骨架时发现服务端语义（TTL、令牌哈希、读取次数、限流、状态码、日志禁项）没有契约来源",
+      "impact": ["link.json", "docs/design.md §5.7", "docs/接口冻结.md", "scripts/contract-check.ps1", "scripts/arch-check.ps1", "crates/meito-link"]
+    },
     {
       "version": "0.2.0",
       "date": "2026-11-08",
@@ -22,7 +28,8 @@
     "connection-package.json",
     "udp-probe.json",
     "meito-config.schema.json",
-    "tools-lock.schema.json"
+    "tools-lock.schema.json",
+    "link.json"
   ],
   "byoTurn": {
     "status": "reserved",

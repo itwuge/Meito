@@ -1,0 +1,74 @@
+{
+  "contractVersion": "0.3.0",
+  "purpose": "meito-link 协调服务的服务端语义：通道生命周期、令牌哈希、读取语义、限流、状态码映射与日志禁项",
+  "channelId": {
+    "opaque": true,
+    "maxLength": 128,
+    "parsedByServer": false
+  },
+  "channelTtlSeconds": 7200,
+  "tokenHash": {
+    "algorithm": "sha256",
+    "encoding": "hex",
+    "logged": false,
+    "purpose": "只用于校验调用方令牌；哈希值不得写入任何日志"
+  },
+  "tokens": {
+    "readTokenIssuance": "once-per-channel",
+    "writeTokenIssuance": "once-per-channel",
+    "readTokenOneTime": false
+  },
+  "registerPayload": {
+    "required": [
+      "channel_id",
+      "read_token_hash",
+      "write_token_hash",
+      "public_key"
+    ],
+    "description": "POST /v1/channels 必须同时提交四个字段；缺少 write_token_hash 时服务端无从校验 PUT"
+  },
+  "packageLimit": {
+    "maxCiphertextBytesRef": "connection-package.json#serverHandling.maxCiphertextBytes",
+    "note": "只引用，不复写数值；单包上限以 connection-package.json 为准"
+  },
+  "getSemantics": {
+    "repeatableUntil": [
+      "delete",
+      "ttl"
+    ],
+    "maxReads": 10,
+    "readTokenMeaning": "每通道只签发一次，不是只能读一次"
+  },
+  "rateLimit": {
+    "perChannelPerMinute": 60,
+    "perIpPerMinute": 120,
+    "burst": 10
+  },
+  "httpStatusMap": {
+    "bad_token": 403,
+    "unknown_channel": 404,
+    "too_large": 413,
+    "rate_limited": 429,
+    "method_not_allowed": 405,
+    "malformed": 400,
+    "internal": 500
+  },
+  "logging": {
+    "allowedFields": [
+      "channel_id",
+      "size",
+      "status"
+    ],
+    "onlyAllowedFields": true,
+    "forbiddenContent": [
+      "blob",
+      "ciphertext",
+      "digest",
+      "hash",
+      "sha256"
+    ],
+    "blobLogged": false,
+    "hashLogged": false,
+    "rule": "服务端日志只允许记录通道 id、大小与状态；禁止记录密文片段与任何摘要，哈希仅用于完整性校验且不落日志"
+  }
+}
