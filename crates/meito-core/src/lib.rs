@@ -11,21 +11,10 @@ pub const CONTRACT_VERSION: &str = "0.3.2";
 /// 会话日志路径前缀，完整路径为 `logs/session-<id>.jsonl`。
 pub const SESSION_LOG_PATH_PREFIX: &str = "logs/session-";
 
-/// 连接包 magic，长度必须与 `contracts/connection-package.json` 一致。
-pub const CONNECTION_PACKAGE_MAGIC: &str = "MEITO1";
-
-/// 连接包格式版本。
-pub const CONNECTION_PACKAGE_FORMAT_VERSION: u8 = 1;
-
-/// 唯一允许的加密算法标识。
-pub const CRYPTO_ALGORITHM_ID: &str = "x25519-xchacha20poly1305";
-
-/// 连接包头部写入的算法 id 字节。
-pub const CRYPTO_ALGORITHM_ID_BYTE: u8 = 0;
-
 /// 环境台账路径前缀，完整路径为 `logs/env-session-<id>.json`。
 pub const ENV_LEDGER_PATH_PREFIX: &str = "logs/env-session-";
 
+mod connection_package;
 mod controller;
 mod doctor;
 mod entry;
@@ -40,6 +29,11 @@ mod time;
 mod tools_lock;
 mod workflow;
 
+pub use connection_package::{
+    decode_package_wire, encode_package_wire, load_connection_package_contract,
+    open_connection_package, seal_connection_package, ConnectionKeyPair, ConnectionPackageContract,
+    PackageLayout, CONNECTION_PACKAGE_CONTRACT_PATH,
+};
 pub use controller::{ArtifactStore, Command, Controller, EntryAdapter, P2pProvider, SessionView};
 pub use doctor::{run_doctor, CheckStatus, DoctorCheck, DoctorReport, CONTRACT_FILES};
 pub use entry::{load_entry_ports, EntryPorts, ENTRY_CONTRACT_PATH};
