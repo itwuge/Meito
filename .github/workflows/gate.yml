@@ -1,0 +1,41 @@
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-gate-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SelfTest
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\gate.ps1 -SelfTest
+
+      - name: Full gate
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\gate.ps1
+
+      - name: Arch check
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\arch-check.ps1
+
+  rust-gate-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust checks (skip if workspace not established)
+        shell: bash
+        run: |
+          if [ -f Cargo.toml ]; then
+            cargo fmt --all -- --check
+            cargo clippy --workspace --all-targets -- -D warnings
+            cargo test --workspace
+          else
+            echo "SKIP: Rust workspace 未建立（M0），cargo fmt/clippy/test 未启用。"
+          fi

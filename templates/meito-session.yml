@@ -1,0 +1,111 @@
+# ===== Meito 会话 workflow 模板 =====
+# 用法：复制到目标仓库的 .github/workflows/meito-session.yml；必须在默认分支存在。
+# 说明：本模板只编排；业务逻辑在 meito-runner；输入不含任何秘密。
+
+name: meito-session
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: "会话 id（CLI 生成）"
+        required: true
+        type: string
+      ref:
+        description: "检出引用"
+        required: true
+        default: main
+        type: string
+      max_minutes:
+        description: "最长会话分钟（≤300）"
+        required: true
+        default: "60"
+        type: string
+      idle_minutes:
+        description: "空闲分钟"
+        required: true
+        default: "10"
+        type: string
+      p2p_provider:
+        description: "P2P provider（禁止中继）"
+        required: true
+        default: frp_xtcp
+        type: choice
+        options: [frp_xtcp, tailscale_direct]
+      entry:
+        description: "入口"
+        required: true
+        default: terminal
+        type: choice
+        options: [terminal, graphical, both]
+      channel:
+        description: "加密连接包 id（不含秘密）"
+        required: true
+        type: string
+      artifact_spec:
+        description: "产物路径白名单"
+        required: true
+        type: string
+      flags:
+        description: "JSON：share_mode/read_only/no_join_timeout/allow_graphical/checkpoint_minutes"
+        required: true
+        type: string
+      meito_version:
+        description: "引导版本"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: meito-session-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: meito-debug
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: actor allowlist
+        run: bash scripts/remote/check-actor.sh
+
+      - name: preflight
+        run: bash scripts/remote/preflight.sh
+
+      - name: bootstrap
+        run: bash scripts/remote/bootstrap.sh
+
+      - name: session
+        run: bash scripts/remote/run-session.sh
+
+      - name: job summary
+        if: always()
+        run: bash scripts/remote/summary.sh
+
+      - name: collect
+        if: always()
+        run: bash scripts/remote/collect.sh
+
+      - name: upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meito-logs-${{ inputs.session_id }}
+          path: logs/session-${{ inputs.session_id }}.jsonl
+          retention-days: 1
+
+      - name: upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meito-artifacts-${{ inputs.session_id }}
+          path: logs/env-session-${{ inputs.session_id }}.json
+          retention-days: 1

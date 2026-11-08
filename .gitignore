@@ -1,0 +1,29 @@
+# Rust
+/target/
+**/target/
+Cargo.lock
+
+# Meito runtime
+/.meito/
+/logs/
+/dist/
+*.log
+
+# Web
+/web/node_modules/
+/web/pkg/
+
+# Secrets / local
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+known_hosts*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.screenshots/.tmp/
+.vscode/
+.idea/
