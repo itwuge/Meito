@@ -1,4 +1,4 @@
-//! File: meito-core 公共契约与内核实现（M2）。
+//! File: meito-core 公共契约与内核实现（M2/M3）。
 //!
 //! 本 crate 是两个外壳共用的唯一 Model 实现；本地 CLI 与网页外壳只能依赖这里的公共接口，
 //! 不得各自复制状态机、P2P 与 artifact 策略。冻结来源见仓库根目录 `contracts/`。
@@ -36,6 +36,7 @@ mod state;
 mod state_store;
 mod status;
 mod time;
+mod tools_lock;
 mod workflow;
 
 pub use controller::{ArtifactStore, Command, Controller, EntryAdapter, P2pProvider, SessionView};
@@ -56,6 +57,7 @@ pub use state::{
 };
 pub use state_store::{SessionSnapshot, StateStore};
 pub use status::{read_status, StatusReport};
+pub use tools_lock::{load_tools_lock, PinStatus, ToolPin, ToolsLock, TOOLS_LOCK_PATH};
 pub use workflow::{init_workflow, InitReport, WORKFLOW_DESTINATION_PATH, WORKFLOW_TEMPLATE_PATH};
 
 /// 生成一个符合契约的 UUID v4 会话 id。

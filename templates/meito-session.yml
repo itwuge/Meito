@@ -39,19 +39,19 @@ on:
         type: choice
         options: [terminal, graphical, both]
       channel:
-        description: "加密连接包 id（不含秘密）"
+        description: "不透明通道 id（≤128，不含秘密）"
         required: true
         type: string
-      artifact_spec:
-        description: "产物路径白名单"
+      channel_write_token:
+        description: "一次性写 token（≤128）"
+        required: true
+        type: string
+      channel_public_key:
+        description: "runner 临时 X25519 公钥（base64url 无填充）"
         required: true
         type: string
       flags:
-        description: "JSON：share_mode/read_only/no_join_timeout/allow_graphical/checkpoint_minutes"
-        required: true
-        type: string
-      meito_version:
-        description: "引导版本"
+        description: "JSON：artifact_spec/meito_version/allowed_actors/share_mode/read_only/no_join_timeout_minutes/allow_graphical/checkpoint_minutes"
         required: true
         type: string
 
@@ -108,6 +108,6 @@ jobs:
         with:
           name: meito-artifacts-${{ inputs.session_id }}
           path: |
-            ${{ inputs.artifact_spec }}
+            ${{ fromJSON(inputs.flags).artifact_spec }}
             logs/env-session-${{ inputs.session_id }}.json
           retention-days: 1

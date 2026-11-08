@@ -375,8 +375,17 @@ fn version_and_help_exit_with_zero() {
 
     let version = run(directory.path(), &["--version"], &[]);
     version.assert_code(0);
+    // 契约版本从文件读取，避免契约升级时把测试写死成第二个版本号。
+    let contract_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../contracts/contract-version.json");
+    let text = std::fs::read_to_string(&contract_path).expect("读取契约版本文件");
+    let contract: Value = serde_json::from_str(&text).expect("解析契约版本文件");
+    let expected = contract["contractVersion"]
+        .as_str()
+        .expect("契约版本是字符串");
     assert!(
-        version.stdout.contains("meito") && version.stdout.contains("contract 0.1.0"),
+        version.stdout.contains("meito")
+            && version.stdout.contains(&format!("contract {expected}")),
         "版本输出应包含程序名与契约版本：{}",
         version.stdout
     );

@@ -1,0 +1,10 @@
+{
+  "lockVersion": 1,
+  "tools": {
+    "meito-runner": { "version": null, "url": null, "sha256": null, "status": "unpinned" },
+    "frpc": { "version": null, "url": null, "sha256": null, "status": "unpinned" },
+    "ttyd": { "version": null, "url": null, "sha256": null, "status": "unpinned" },
+    "x11vnc": { "version": null, "url": null, "sha256": null, "status": "unpinned" },
+    "websockify": { "version": null, "url": null, "sha256": null, "status": "unpinned" }
+  }
+}

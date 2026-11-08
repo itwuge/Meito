@@ -41,11 +41,27 @@ if ($null -ne $version) {
     }
 }
 
-$contractFiles = @("cli.json", "log.json", "workflow.json", "state-machine.json", "error-codes.json")
+$contractFiles = @(
+    "cli.json",
+    "log.json",
+    "workflow.json",
+    "state-machine.json",
+    "error-codes.json",
+    "artifact-manifest.schema.json",
+    "connection-package.json",
+    "udp-probe.json",
+    "meito-config.schema.json",
+    "tools-lock.schema.json"
+)
 foreach ($f in $contractFiles) {
+    if ($null -ne $version -and -not (@($version.files) -contains $f)) {
+        Fail "CONTRACT_FILE_LIST" "contract-version.files 缺少冻结契约：$f"
+    }
     $doc = Load-Json (Join-Path "contracts" $f)
-    if ($null -ne $doc -and [string]$doc.contractVersion -ne $contractVersion) {
-        Fail "CONTRACT_VERSION" "$f 的 contractVersion 与 contract-version.json 不一致"
+    if ($null -ne $doc -and ($doc.PSObject.Properties.Name -contains "contractVersion")) {
+        if ([string]$doc.contractVersion -ne $contractVersion) {
+            Fail "CONTRACT_VERSION" "$f 的 contractVersion 与 contract-version.json 不一致"
+        }
     }
 }
 
@@ -170,8 +186,15 @@ if ($null -ne $wf) {
         if ($inputNames.ContainsKey($n)) { Fail "CONTRACT_WF_INPUTS" "workflow 输入重复：$n" }
         $inputNames[$n] = $true
     }
-    foreach ($required in @("session_id", "ref", "max_minutes", "idle_minutes", "p2p_provider", "entry", "channel", "artifact_spec", "flags", "meito_version")) {
+    foreach ($required in @("session_id", "ref", "max_minutes", "idle_minutes", "p2p_provider", "entry", "channel", "channel_write_token", "channel_public_key", "flags")) {
         if (-not $inputNames.ContainsKey($required)) { Fail "CONTRACT_WF_INPUTS" "缺少冻结输入：$required" }
+    }
+    $channel = $wf.inputs | Where-Object { $_.name -eq "channel" }
+    if ([int]$channel.maxLength -gt 128) { Fail "CONTRACT_WF_CHANNEL" "channel 必须是不透明 id 且不超过 128 字符" }
+    if ($channel.description -notmatch "不透明") { Fail "CONTRACT_WF_CHANNEL" "channel 必须明确为不透明 id" }
+    $flags = $wf.inputs | Where-Object { $_.name -eq "flags" }
+    foreach ($fieldName in @("artifact_spec", "meito_version", "allowed_actors")) {
+        if (@($flags.fields) -notcontains $fieldName) { Fail "CONTRACT_WF_FLAGS" "flags 缺少字段：$fieldName" }
     }
     $template = [string]$wf.template
     if (-not (Test-Path -LiteralPath $template)) {
@@ -199,6 +222,103 @@ if ($null -ne $wf) {
     }
     if ($wf.outputs.connectionPackage.inArtifact -ne $false -or $wf.outputs.connectionPackage.inLog -ne $false) {
         Fail "CONTRACT_WF_SECRET" "连接包不得写入 artifact 或日志"
+    }
+}
+
+# ===== 连接包 / UDP / 配置 / 依赖锁定（0.2.0 新增） =====
+$cp = Load-Json "contracts/connection-package.json"
+if ($null -ne $cp) {
+    if ([string]$cp.magic -ne "MEITO1" -or [int]$cp.magicBytes -ne 6) {
+        Fail "CONTRACT_CP_MAGIC" "连接包 magic 必须为 MEITO1 且占 6 字节"
+    }
+    if ([int]$cp.formatVersion -ne 1) { Fail "CONTRACT_CP_VERSION" "连接包 formatVersion 必须为 1" }
+    if ([string]$cp.algorithm.id -ne "x25519-xchacha20poly1305") {
+        Fail "CONTRACT_CP_ALG" "算法 id 必须为 x25519-xchacha20poly1305"
+    }
+    if ([int]$cp.algorithm.idByte -ne 0) { Fail "CONTRACT_CP_ALG" "算法 idByte 必须为 0" }
+    $algorithmIds = @($cp.algorithmIds)
+    if ($algorithmIds.Count -ne 1) { Fail "CONTRACT_CP_ALG" "算法 id 表当前只允许 1 项" }
+    if ([string]$algorithmIds[0].name -ne [string]$cp.algorithm.id -or [int]$algorithmIds[0].id -ne [int]$cp.algorithm.idByte) {
+        Fail "CONTRACT_CP_ALG" "algorithmIds 必须与 algorithm.id/idByte 一致"
+    }
+    if ([string]$cp.encoding.wireEncoding -ne "base64url-no-padding") {
+        Fail "CONTRACT_CP_LAYOUT" "线格式必须为 base64url-no-padding"
+    }
+    $expectedLayout = @("magic", "format_version", "algorithm_id", "ephemeral_public_key", "nonce", "ciphertext")
+    $actualLayout = @($cp.layout | ForEach-Object { [string]$_.name })
+    if (($actualLayout -join ",") -ne ($expectedLayout -join ",")) {
+        Fail "CONTRACT_CP_LAYOUT" "连接包布局顺序必须为 magic,format_version,algorithm_id,ephemeral_public_key,nonce,ciphertext"
+    }
+    $expectedBytes = @(6, 1, 1, 32, 24)
+    for ($i = 0; $i -lt $expectedBytes.Count; $i++) {
+        if ([int]$cp.layout[$i].bytes -ne $expectedBytes[$i]) {
+            Fail "CONTRACT_CP_LAYOUT" "连接包第 $($i + 1) 段字节数不符"
+        }
+    }
+    if ($cp.layout[5].includesTag -ne $true) { Fail "CONTRACT_CP_LAYOUT" "密文必须包含 AEAD tag" }
+    if ([string]$cp.serverHandling.store -ne "ciphertext-only" -or $cp.serverHandling.parse -ne $false -or $cp.serverHandling.log -ne $false) {
+        Fail "CONTRACT_CP_SERVER" "服务端只能存密文，禁止解析或记录"
+    }
+    if ([int]$cp.serverHandling.maxCiphertextBytes -ne 16384) {
+        Fail "CONTRACT_CP_SERVER" "单包密文上限必须为 16384 字节"
+    }
+}
+
+$udp = Load-Json "contracts/udp-probe.json"
+if ($null -ne $udp) {
+    if ([string]$udp.request.magic -ne "MEITOUDP" -or [int]$udp.request.magicBytes -ne 8) {
+        Fail "CONTRACT_UDP_MAGIC" "UDP magic 必须为 MEITOUDP 且占 8 字节"
+    }
+    if ([int]$udp.request.nonceBytes -ne 8) { Fail "CONTRACT_UDP_NONCE" "UDP nonce 必须为 8 字节" }
+    if ([int]$udp.timeout.attempts -ne 3 -or [int]$udp.timeout.perAttemptMs -ne 1000) {
+        Fail "CONTRACT_UDP_TIMEOUT" "UDP 探测必须为 3 次尝试、每次 1000ms"
+    }
+    if ([string]$udp.target.key -ne "udp_probe_target" -or $udp.target.requiredWhenProbeEnabled -ne $true) {
+        Fail "CONTRACT_UDP_TARGET" "UDP 目标必须来自 meito.toml 的 udp_probe_target 且启用时必填"
+    }
+    if ([string]$udp.listener.provider -ne "meito-link" -or $udp.listener.defaultEnabled -ne $false -or $udp.listener.forwardsSessionBytes -ne $false) {
+        Fail "CONTRACT_UDP_LISTENER" "meito-link UDP 监听必须默认关闭且不转发会话字节"
+    }
+}
+
+$config = Load-Json "contracts/meito-config.schema.json"
+if ($null -ne $config) {
+    if (@($config.required) -notcontains "security") { Fail "CONTRACT_CONFIG" "配置必须要求 security 表" }
+    if ($config.additionalProperties -ne $false) { Fail "CONTRACT_CONFIG" "配置不得允许未知顶层字段" }
+    if (@($config.properties.security.required) -notcontains "allowed_actors") { Fail "CONTRACT_CONFIG" "security 必须要求 allowed_actors" }
+    if ($config.properties.security.additionalProperties -ne $false) { Fail "CONTRACT_CONFIG" "security 不得允许未知字段" }
+    if ([int]$config.properties.security.properties.allowed_actors.items.minLength -ne 1) { Fail "CONTRACT_CONFIG" "allowed_actors 元素不得为空" }
+    foreach ($key in @("missingConfig", "missingAllowedActors", "emptyAllowedActors")) {
+        if ([string]$config.failClosed.$key -ne "deny-all") { Fail "CONTRACT_CONFIG" "failClosed.$key 必须为 deny-all" }
+    }
+    if ([string]$config.failClosed.workflowOverride -ne "allowed") { Fail "CONTRACT_CONFIG" "workflowOverride 必须允许" }
+    if ([string]$config.failClosed.workflowOverrideInput -ne "flags.allowed_actors") { Fail "CONTRACT_CONFIG" "覆盖输入必须为 flags.allowed_actors" }
+    if ([string]$config.failClosed.workflowOverridePrecedence -ne "override") { Fail "CONTRACT_CONFIG" "覆盖优先级必须为 override" }
+    $udpPattern = [string]$config.properties.network.properties.udp_probe_target.pattern
+    if (-not $udpPattern.StartsWith("^[A-Za-z0-9_") -or -not $udpPattern.Contains(":[0-9]")) {
+        Fail "CONTRACT_CONFIG" "udp_probe_target 必须为 host:port 形状"
+    }
+}
+
+$lockSchema = Load-Json "contracts/tools-lock.schema.json"
+if ($null -ne $lockSchema) {
+    if (@($lockSchema.properties.lockVersion.enum) -notcontains 1) { Fail "CONTRACT_LOCK" "lockVersion 只允许 1" }
+    if ([int]$lockSchema.properties.tools.minProperties -lt 1) { Fail "CONTRACT_LOCK" "tools 不得为空" }
+    if (@($lockSchema.properties.tools.additionalProperties.properties.status.enum) -notcontains "pinned" -or @($lockSchema.properties.tools.additionalProperties.properties.status.enum) -notcontains "unpinned") {
+        Fail "CONTRACT_LOCK" "status 只允许 pinned/unpinned"
+    }
+    $requiredPinned = @($lockSchema.properties.tools.additionalProperties.allOf[0].then.required)
+    foreach ($f in @("version", "url", "sha256")) {
+        if ($requiredPinned -notcontains $f) { Fail "CONTRACT_LOCK" "pinned 条目必须要求 $f" }
+    }
+    if ([string]$lockSchema.properties.tools.additionalProperties.properties.sha256.pattern -ne "^[0-9a-f]{64}$") {
+        Fail "CONTRACT_LOCK" "sha256 必须为 64 位小写十六进制"
+    }
+    foreach ($key in @("refuseUnpinned", "refuseInstallWhenUnpinned", "verifySha256BeforeRun", "forbidCurlPipeShell")) {
+        if ($lockSchema.policy.$key -ne $true) { Fail "CONTRACT_LOCK" "policy.$key 必须为 true" }
+    }
+    foreach ($pattern in @("curl:*|*bash", "curl:*|*sh", "wget:*|*bash", "wget:*|*sh")) {
+        if (@($lockSchema.policy.forbiddenPatterns) -notcontains $pattern) { Fail "CONTRACT_LOCK" "forbiddenPatterns 缺少：$pattern" }
     }
 }
 
