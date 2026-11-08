@@ -117,6 +117,7 @@ name = "meito-link"
 version = "0.3.0"
 dependencies = [
  "meito-core",
+ "serde_json",
  "tracing",
 ]
 
