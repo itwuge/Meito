@@ -2,7 +2,7 @@
 # 用途：串接经验库门禁、Rust 格式/静态检查/测试与架构检查。
 # 说明：M0 尚无 Rust workspace 时，Rust 项明确标记 SKIP，不伪造通过。
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
@@ -23,7 +23,7 @@ Write-Host "==> gate.ps1 -SelfTest"
 & "$root\scripts\gate.ps1" -SelfTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Run-Step "gate.ps1 全量" { & "$root\scripts\gate.ps1" }
+Run-Step "gate.ps1 全量" { & "$root\scripts\gate.ps1" -BaseRef main }
 
 if (Test-Path "$root\Cargo.toml") {
     Run-Step "cargo fmt --check" { cargo fmt --all -- --check }

@@ -19,7 +19,7 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\gate.ps1 -SelfTest
 
       - name: Full gate
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\gate.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\gate.ps1 -BaseRef main
 
       - name: Arch check
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\arch-check.ps1

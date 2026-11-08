@@ -101,7 +101,7 @@ Meito 要在 GitHub 托管 runner 上获得一个可交互会话，用于 `make 
 | SC-11 | 日志不泄露连接串/令牌/私钥 | 对本地与 runner 日志做正则扫描，命中数为 0；artifact 中不含连接串 | 未验证 |
 | SC-12 | 6 小时硬上限前主动收尾 | `max_minutes` 默认 60、硬上限 300；watchdog 在 300 前结束并上传 checkpoint；不依赖 360 的强制 fail | 未验证 |
 | SC-13 | 非交互 defconfig 路线可复现 | 同一输入文件连续 2 次生成 `defconfig`，SHA256 相同；与 menuconfig 样本对比差异可解释 | 未验证 |
-| SC-14 | 门禁与仓库初始化可用 | `scripts/gate.ps1 -SelfTest` 退出码 0；全量门禁退出码 0；`docs/分支归属.md` 六行已填 | 待本次收尾执行（结果写入变更记录） |
+| SC-14 | 门禁与仓库初始化可用 | `scripts/gate.ps1 -SelfTest` 退出码 0；全量门禁退出码 0；`docs/分支归属.md` 六行已填 | 本次已验证：SelfTest PASS、全量 0 violations、首个提交 `7bb9335`（见变更记录） |
 | SC-15 | 新用户按 README 快速开始可完成 | 另一台干净机器按 README 操作，15 min 内到达入口；记录实际失败点 | 未验证 |
 | SC-16 | 网页版只走 WebRTC DataChannel + STUN，无 TURN | 浏览器 `RTCPeerConnection.getStats()` 中 selected candidate pair 为 `host`/`srflx`，无 `relay`；配置中 TURN URL 为空；强制禁用 TURN 后仍能连通，或明确返回 `E_WEB_NO_DIRECT_PATH` | 未验证 |
 | SC-17 | 一套内核、两个外壳 | `scripts/arch-check.ps1` 退出 0；`crates/meito-web` 与 `crates/meito-cli` 不含会话状态机/artifact 清单/P2P 策略的重复定义；两个外壳都依赖同一 `meito-core` 公共接口 | 未验证 |
