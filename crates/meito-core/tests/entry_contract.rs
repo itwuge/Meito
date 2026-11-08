@@ -98,6 +98,39 @@ fn wildcard_bind_is_rejected() {
 }
 
 #[test]
+fn graphical_entry_remains_reserved() {
+    let value: Value = serde_json::from_str(&contract_text()).expect("解析仓库入口契约");
+    assert_eq!(
+        value["graphical"]["status"].as_str(),
+        Some("reserved"),
+        "v1 图形入口必须保持 reserved"
+    );
+    for key in [
+        "ports.graphical",
+        "ports.vnc",
+        "graphical.framebuffer",
+        "graphical.vncPasswordChars",
+        "graphical.vncPasswordDesOnly",
+    ] {
+        assert_eq!(
+            value["requiredness"][key].as_str(),
+            Some("reserved"),
+            "{key} 必须保持 reserved"
+        );
+    }
+    assert_eq!(
+        value["requiredness"]["ports.terminal"].as_str(),
+        Some("required"),
+        "终端入口必须是 required"
+    );
+    assert_eq!(
+        value["requiredness"]["bind.address"].as_str(),
+        Some("required"),
+        "回环绑定必须是 required"
+    );
+}
+
+#[test]
 fn missing_contract_is_rejected() {
     let root = temp_root("missing");
     let error = load_entry_ports(&root).expect_err("缺少契约必须被拒绝");

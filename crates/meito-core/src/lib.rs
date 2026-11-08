@@ -14,6 +14,7 @@ pub const SESSION_LOG_PATH_PREFIX: &str = "logs/session-";
 /// 环境台账路径前缀，完整路径为 `logs/env-session-<id>.json`。
 pub const ENV_LEDGER_PATH_PREFIX: &str = "logs/env-session-";
 
+mod acceptance;
 mod connection_package;
 mod controller;
 mod doctor;
@@ -29,6 +30,7 @@ mod time;
 mod tools_lock;
 mod workflow;
 
+pub use acceptance::{load_lightweight_budget, LightweightBudget, ACCEPTANCE_CONTRACT_PATH};
 pub use connection_package::{
     decode_package_wire, encode_package_wire, load_connection_package_contract,
     open_connection_package, seal_connection_package, ConnectionKeyPair, ConnectionPackageContract,

@@ -21,13 +21,16 @@ const LOOPBACK_ADDRESS: &str = "127.0.0.1";
 // ===== 数据结构 =====
 
 /// 入口监听端口；三个端口都必须只绑回环。
+///
+/// `graphical` 与 `vnc` 是契约 0.3.3 起的 `reserved` 占位：v1 只加载数值，不启动图形链路，
+/// 也不得因状态为 `reserved` 就删除字段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntryPorts {
     /// ttyd 终端入口端口。
     pub terminal: u16,
-    /// noVNC/websockify 图形入口端口。
+    /// noVNC/websockify 图形入口端口；v1 预留，不监听。
     pub graphical: u16,
-    /// x11vnc 的 VNC 端口，仅回环并由 websockify 转发。
+    /// x11vnc 的 VNC 端口；v1 预留，不监听。
     pub vnc: u16,
 }
 
