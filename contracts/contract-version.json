@@ -1,10 +1,16 @@
 {
-  "contractVersion": "0.3.4",
+  "contractVersion": "0.3.5",
   "status": "frozen",
   "frozenAt": "2026-11-08",
   "project": "meito",
-  "supersedes": "0.3.3",
+  "supersedes": "0.3.4",
   "revisions": [
+    {
+      "version": "0.3.5",
+      "date": "2026-11-08",
+      "reason": "加密包实现发现契约缺口：密钥派生未定义（实现直接把 X25519 共享密钥当 AEAD 密钥）、密钥材料生命周期缺失、固定测试向量不可复算、AAD 语义未写死",
+      "impact": ["connection-package.json", "scripts/gen-connection-package-vector.py", "docs/design.md §5.11", "docs/接口冻结.md §5.7", "scripts/contract-check.ps1"]
+    },
     {
       "version": "0.3.4",
       "date": "2026-11-08",

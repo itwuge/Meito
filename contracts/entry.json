@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.4",
+  "contractVersion": "0.3.5",
   "purpose": "入口监听端口与回环绑定约束；代码、脚本与文档必须从这里读取，不得另写数值。终端入口与回环绑定是 v1 强制项，图形入口为 P2 可选预留",
   "requiredness": {
     "bind.address": "required",

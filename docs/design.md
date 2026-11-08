@@ -637,6 +637,18 @@ meito clean --orphans --dry-run
 - 网页版的“本地版回退”只显示命令与链接，不在浏览器里模拟 `meito pull --apply`；落到本地仓库必须由本地版完成。
 - 网页版不得直接暴露 6080/7681（端口取自 `contracts/entry.json`）；所有入口只在 runner 回环，DataChannel 是唯一入口。
 
+### 5.11 连接包加解密与密钥材料
+
+连接包的线格式、KDF、AAD 与密钥生命周期以 `contracts/connection-package.json`（0.3.5）为准；实现不得另写算法参数。
+
+- 线格式：magic `MEITO1`（6 字节）+ formatVersion `1` + algorithm_id `0` + 临时公钥 32 字节 + nonce 24 字节 + 含 tag 密文；整体 base64url 无填充。
+- 密钥交换 X25519；AEAD 为 XChaCha20-Poly1305；实现来源 RustCrypto。
+- KDF 固定为 **HKDF-SHA256**：`ikm` 为 X25519 共享密钥；`salt` 固定为空串（按 RFC 5869 等价于 32 个零字节，不采用「魔数+格式版本」）；`info` 固定为 `meito-v1/connection-package`，绑定协议版本 `meito-v1` 与用途 `connection-package`；输出 32 字节作为 AEAD 密钥。**禁止**把 X25519 共享密钥直接当 AEAD 密钥。
+- AAD 固定为无 AAD（`aadBytes=0`），AEAD 调用不得传 AAD；启用或改变 AAD 必须提升 `formatVersion` 并新增 algorithm id。
+- 密钥生命周期：runner 每包生成一次性 X25519 临时密钥，私钥不导出、封装后清零；本地接收方密钥每作业生成，公钥经 workflow 输入 `channel_public_key` 传输，私钥不导出、解封后清零；共享密钥在派生后清零，派生密钥在用后清零。
+- 清零依赖 `zeroize` crate，属尽力而为：仅覆盖本进程持有的缓冲区，且依赖编译器不优化掉清零。**不声称**可抵御内存取证、交换分区、核心转储或冷启动攻击。
+- 固定测试向量：生成脚本 `scripts/gen-connection-package-vector.py`（依赖 PyNaCl==1.6.2），命令 `python scripts/gen-connection-package-vector.py`；输入全部固定（RFC 7748 §6.1 Alice/Bob 私钥、nonce `00..17`、固定 JSON 明文），无系统随机源。实现改为 HKDF 后必须用该脚本重新生成向量，连续两次输出逐字节一致。
+
 ---
 
 ## 6. 产物回传

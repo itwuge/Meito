@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.4",
+  "contractVersion": "0.3.5",
   "binary": "meito",
   "globalOptions": [
     { "name": "--repo", "type": "string", "required": false, "env": "MEITO_REPO", "description": "owner/repo" },
