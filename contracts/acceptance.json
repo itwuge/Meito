@@ -1,6 +1,6 @@
 {
-  "contractVersion": "0.3.3",
-  "purpose": "SC-01 一类验收指标的单一来源；验收脚本必须引用 metrics，不得在文档或脚本里另写数值。图形入口相关指标为 optional，不阻塞 v1 验收",
+  "contractVersion": "0.3.4",
+  "purpose": "SC-01 一类验收指标与轻量性预算的单一来源；验收脚本必须引用 metrics/lightweight，不得在文档或脚本里另写数值。图形入口相关指标为 optional，不阻塞 v1 验收",
   "requiredness": {
     "sc01ColdStartP95Seconds": "required",
     "sc01Samples": "required",
@@ -14,7 +14,16 @@
     "sc08IdleStopGraceMinutes": "required",
     "sc08DownStopGraceSeconds": "required",
     "sc13DefconfigRuns": "required",
-    "sc15FirstRunMinutes": "required"
+    "sc15FirstRunMinutes": "required",
+    "releaseBinaryBytesMax": "pending-calibration",
+    "localIdleResidentBytesMax": "pending-calibration",
+    "runnerPreflightResidentBytesMax": "pending-calibration",
+    "linkIdleResidentBytesMax": "pending-calibration",
+    "cliColdStartOfflineMillisMax": "pending-calibration",
+    "directDependencyCountMax": "pending-calibration",
+    "runnerResidentProcessCountMax": "required",
+    "runnerNewPackageCountMax": "required",
+    "graphicalComponentCountMax": "required"
   },
   "graphical": {
     "status": "reserved",
@@ -35,5 +44,57 @@
     "sc08DownStopGraceSeconds": 60,
     "sc13DefconfigRuns": 2,
     "sc15FirstRunMinutes": 15
+  },
+  "lightweight": {
+    "status": "required",
+    "purpose": "v1 轻量性预算；阈值由本段唯一给出，验收脚本按 methods 采样，不得另写数值",
+    "metrics": {
+      "releaseBinaryBytesMax": "pending-calibration",
+      "localIdleResidentBytesMax": "pending-calibration",
+      "runnerPreflightResidentBytesMax": "pending-calibration",
+      "linkIdleResidentBytesMax": "pending-calibration",
+      "cliColdStartOfflineMillisMax": "pending-calibration",
+      "directDependencyCountMax": "pending-calibration",
+      "runnerResidentProcessCountMax": 4,
+      "runnerNewPackageCountMax": 3,
+      "graphicalComponentCountMax": 0
+    },
+    "pendingCalibration": {
+      "releaseBinaryBytesMax": {
+        "neededMeasurement": "首次 v1 release 构建后量单平台单文件体积（Linux x86_64 与 Windows x86_64 各一次），以实测值再定上限",
+        "calibratedBy": "M4"
+      },
+      "localIdleResidentBytesMax": {
+        "neededMeasurement": "本地版 CLI 活跃会话空闲 60 秒窗口内 RSS 峰值（每 5 秒采样一次）",
+        "calibratedBy": "M6"
+      },
+      "runnerPreflightResidentBytesMax": {
+        "neededMeasurement": "runner 侧 preflight 进程峰值 RSS（连续 3 次取最大）",
+        "calibratedBy": "M4"
+      },
+      "linkIdleResidentBytesMax": {
+        "neededMeasurement": "meito-link 空载 5 分钟窗口内 RSS 峰值（每 10 秒采样一次）",
+        "calibratedBy": "M6"
+      },
+      "cliColdStartOfflineMillisMax": {
+        "neededMeasurement": "CLI 无网络操作冷启动墙钟时间，先预热 1 次，再跑 10 次取 p95",
+        "calibratedBy": "M4"
+      },
+      "directDependencyCountMax": {
+        "neededMeasurement": "M4 功能依赖冻结后，cargo metadata 去重统计 workspace 成员的非 path 直接依赖数",
+        "calibratedBy": "M4"
+      }
+    },
+    "methods": {
+      "releaseBinaryBytesMax": "cargo build --release 后取 target/release 下单文件体积：Linux 用 `stat -c %s`，Windows 用 `(Get-Item).Length`；不含 UPX 压缩，单平台单文件",
+      "localIdleResidentBytesMax": "会话就绪后在本地版 CLI 进程上执行 `ps -o rss= -p <pid>`，每 5 秒采样一次、窗口 60 秒、取最大值（单位 KiB）",
+      "runnerPreflightResidentBytesMax": "在 runner 上执行 `/usr/bin/time -v meito-runner preflight`，取 Maximum resident set size，连续 3 次取最大",
+      "linkIdleResidentBytesMax": "meito-link 启动且无请求后 5 分钟窗口内每 10 秒执行 `ps -o rss= -p <pid>`，取最大值（单位 KiB）",
+      "cliColdStartOfflineMillisMax": "预热 1 次后，对无网络命令执行 10 次，用 `time`/`Measure-Command` 取墙钟时间 p95，窗口为进程 spawn 到 exit",
+      "directDependencyCountMax": "`cargo metadata --format-version 1 --no-deps`，汇总 workspace 成员的 dependencies 名称并去重，排除 path 依赖",
+      "runnerResidentProcessCountMax": "入口就绪后 60 秒窗口内每 10 秒执行 `ps -eo comm`，统计 meito-runner/frpc/ttyd/tmux 四类进程数，取最大值；不计采样命令自身",
+      "runnerNewPackageCountMax": "同一 job 内 bootstrap 前后各执行一次 `dpkg -l | wc -l`（或 `rpm -qa | wc -l`），取差值",
+      "graphicalComponentCountMax": "入口就绪后执行 `ps -eo comm` 统计 Xvfb/x11vnc/websockify/novnc_proxy，并用 `ss -ltnp` 检查 6080/5900 监听；两项计数必须为 0"
+    }
   }
 }

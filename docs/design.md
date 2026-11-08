@@ -109,10 +109,13 @@ Meito 要在 GitHub 托管 runner 上获得一个可交互会话，用于 `make 
 | SC-19 | 可写/只读双链接 | 只读链接无法执行输入、无法保存文件；写链接需一次性 token；无人加入超过 `no_join_timeout` 自动取消并上传空会话日志 | 未验证 |
 | SC-20 | 网页版“连不上”可解释 | 对称 NAT/UDP 被封时返回 `E_WEB_NO_DIRECT_PATH`，页面显示原因、已尝试的 ICE 类型、转本地版的命令；文案不出现“任意网络可连” | 未验证 |
 | SC-21 | 连接串进 Job Summary 但不泄密 | Job Summary 只含 session_id、状态、入口类型、过期时间、只读/写链接标记；`artifact_guard` 扫描连接串/令牌命中数为 0 | 未验证 |
+| SC-22 | v1 轻量性预算 | `contracts/acceptance.json#lightweight` 的发布体积、三处常驻内存、CLI 离线冷启动、直接依赖数、runner 常驻进程与新增安装包、图形组件数量按 `methods` 采样并达标；未校准项标 `pending-calibration`，不拍数 | 未验证 |
 
 判据纪律（R-D-3、R-D-4、R-D-5）：判据先写进 `docs/验收记录/`，再执行；不达标不改阈值、不放宽判据、不把“没报错”写成“通过”。未跑通项统一写“未验证”。
 
 图形入口相关判据（SC-06/SC-07 中的 VNC 部分）在 v1 标为 optional，不阻塞 v1 验收；v1 图形兜底与 P2 取舍见 §10.8。
+
+轻量预算的阈值与测法只写在 `contracts/acceptance.json#lightweight`；`pending-calibration` 项在预算确定前不参与通过判定，也不得用临时数字占位。
 
 ---
 
@@ -618,7 +621,7 @@ meito clean --orphans --dry-run
 | 注释规范 | Rust 文件首 25 行有 `//!` 头；`pub fn` 有 `///`；关键文件有 `// ===== 组件名 =====` | `ARCH_NOTE` |
 | 数值单一来源 | 文档正文出现的阈值、时长、上限、端口、状态码必须在 `contracts/` 有对应字段；散文不得成为数值的唯一定义处 | `CONTRACT_DOC_NUMERIC` |
 
-**机器覆盖段落（`CONTRACT_DOC_NUMERIC` 实际校验）**：design §2、§3.2、§5.6、§5.7、§5.10、§8.3、§9.4、§10.2（启停顺序部分）、§10.3、§10.4、§10.7，以及 `docs/接口冻结.md` §5.2–§5.4。抽取规则为：带单位数值（秒/分钟/小时/次/字节/端口/s/min/m/ms/MB/KB/%/位，分钟与小时按秒换算后仍允许原值）、4–5 位端口、`宽x高x深` 分辨率与 `4xx/5xx` 状态码；命中后必须能在 `contracts/*.json` 的数值集合中找到。
+**机器覆盖段落（`CONTRACT_DOC_NUMERIC` 实际校验）**：design §2、§3.2、§5.6、§5.7、§5.10、§8.3、§9.4、§10.2（启停顺序部分）、§10.3、§10.4、§10.7，以及 `docs/接口冻结.md` §5.2–§5.6。抽取规则为：带单位数值（秒/分钟/小时/次/字节/端口/s/min/m/ms/MB/KB/%/位，分钟与小时按秒换算后仍允许原值）、4–5 位端口、`宽x高x深` 分辨率与 `4xx/5xx` 状态码；命中后必须能在 `contracts/*.json` 的数值集合中找到。
 
 **人工审计项（未纳入机器覆盖，文档已显式标注“人工审计”）**：§10.2 的依赖安装耗时估算表、§10.5 带宽与 CPU 估算、§10.6 job 硬上限下的取舍，以及 §4/§7/§11/§12/§14 中的工程估算与对比数据。这些数值不是验收阈值或契约字段，改由评审人对照契约为准；若后续成为验收依据，必须先落 `contracts/` 再移入机器覆盖。
 
@@ -975,6 +978,24 @@ websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 &
 
 本地版 v1 兜底：`ssh -X` 转发单个图形程序（如 `menuconfig` 的图形前端或必须鼠标的配置工具），不启动 runner 侧 X 栈；网页版 v1 不开图形入口。
 
+### 10.9 轻量性预算与测法（v1）
+
+v1 主要保证轻量。阈值、采样窗口与命令只写在 `contracts/acceptance.json#lightweight`，本表只做索引：
+
+| 指标 | 口径 | 测法（详见契约 `methods`） |
+|---|---|---|
+| 发布二进制体积 | 单平台单文件，不含压缩 | 首次 release 构建后量单文件体积 |
+| 本地版空闲内存 | 本地 CLI 活跃会话空闲 | RSS 每 5 秒采样、窗口 60 秒、取峰值 |
+| runner 预检内存 | `meito-runner preflight` | `/usr/bin/time -v` 的 Maximum RSS，连续三次取最大 |
+| meito-link 空载内存 | 无请求的空载服务 | RSS 每 10 秒采样、窗口 5 分钟、取峰值 |
+| CLI 离线冷启动 | 无网络命令，spawn 到 exit | 预热一次后跑 10 次取 p95 |
+| 直接依赖数 | workspace 成员的非 path 直接依赖 | `cargo metadata --no-deps` 去重计数 |
+| runner 常驻进程 | meito-runner/frpc/ttyd/tmux | 入口就绪后 60 秒窗口内取最大值，上限见契约 |
+| runner 新增安装包 | bootstrap 前后 dpkg/rpm 包数差 | 同一 job 内前后快照取差值，上限见契约 |
+| v1 图形组件 | Xvfb/x11vnc/websockify/novnc_proxy 与 6080/5900 监听 | `ps`/`ss` 计数，v1 必须为 0 |
+
+未标定项（发布体积、三处常驻内存、CLI 离线冷启动、直接依赖数）标 `pending-calibration`，按契约里的 `neededMeasurement` 完成实测后再定阈值；在此之前不得先拍一个数当契约。
+
 ---
 
 ## 11. menuconfig 改 defconfig 化（并行路线）
@@ -1165,7 +1186,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\arch-check.ps1
 | G-10 | 接口冻结 | `docs/接口冻结.md` 存在且版本化；两外壳 stub 编译通过；冻结后改动有变更记录 | R-D-9、本设计 13.7 |
 | G-11 | 一事一提交 | 提交前人工核对；CI 不强制 commit 粒度，但阶段验收检查 commit 数与阶段号 | R-T-9 |
 | G-12 | 版本递增 | `gate.ps1` 的 R-D-9：源码变更未 bump 版本即失败 | R-D-9、R-D-12 |
-| G-13 | 数值单一来源 | `contract-check`：文档正文的阈值/时长/上限/端口/状态码必须在 `contracts/` 有对应字段；机器校验覆盖 design §2、§3.2、§5.6、§5.7、§5.10、§8.3、§9.4、§10.2（启停顺序）、§10.3、§10.4、§10.7 与接口冻结 §5.2–§5.4；图形入口字段为 `reserved`、图形指标为 `optional`，不阻塞 v1；§10.2 估算表、§10.5、§10.6 等显式标注“人工审计”，不纳入机器覆盖 | 本设计 5.9、R-D-13 |
+| G-13 | 数值单一来源 | `contract-check`：文档正文的阈值/时长/上限/端口/状态码必须在 `contracts/` 有对应字段；机器校验覆盖 design §2、§3.2、§5.6、§5.7、§5.10、§8.3、§9.4、§10.2（启停顺序）、§10.3、§10.4、§10.7 与接口冻结 §5.2–§5.6；图形入口字段为 `reserved`、图形指标为 `optional`，不阻塞 v1；§10.2 估算表、§10.5、§10.6 等显式标注“人工审计”，不纳入机器覆盖 | 本设计 5.9、R-D-13 |
+| G-14 | 轻量性预算 | `acceptance.json#lightweight` 必须存在；`required` 项完整，`pending-calibration` 项必须有 `neededMeasurement` 与 `calibratedBy`；`contract-check` 断言 | 本设计 10.9、SC-22 |
 
 门禁配置（`gate.config.json`）必须体现：`crates/*/src/**/*.rs` 扫描、`//!` 头注释、`// ===== 组件名 =====` 分区、`tracing` 依赖、CLI 展示层 print 白名单。模板原件的 `tools/gate-template/` 保留，活动脚本在 `scripts/`。
 

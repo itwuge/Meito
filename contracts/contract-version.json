@@ -1,10 +1,16 @@
 {
-  "contractVersion": "0.3.3",
+  "contractVersion": "0.3.4",
   "status": "frozen",
   "frozenAt": "2026-11-08",
   "project": "meito",
-  "supersedes": "0.3.2",
+  "supersedes": "0.3.3",
   "revisions": [
+    {
+      "version": "0.3.4",
+      "date": "2026-11-08",
+      "reason": "用户要求主要保证轻量级；把二进制体积、常驻内存、离线冷启动、直接依赖数、runner 常驻进程/新增安装包、v1 图形组件数量写成可执行验收预算",
+      "impact": ["acceptance.json", "docs/design.md §2/§10.9/§13.8", "docs/接口冻结.md §5.6", "scripts/contract-check.ps1"]
+    },
     {
       "version": "0.3.3",
       "date": "2026-11-08",

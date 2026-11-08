@@ -442,6 +442,43 @@ if ($null -ne $acceptance) {
     }
 }
 
+# ===== 轻量性预算（0.3.4）：已定项与 pending-calibration 项 =====
+$lightweight = $acceptance.lightweight
+if ($null -eq $lightweight) {
+    Fail "CONTRACT_LIGHTWEIGHT" "acceptance.json 缺少 lightweight 预算"
+} else {
+    if ([string]$lightweight.status -ne "required") {
+        Fail "CONTRACT_LIGHTWEIGHT" "lightweight.status 必须为 required"
+    }
+    $fixedBudgets = @{
+        runnerResidentProcessCountMax = 4
+        runnerNewPackageCountMax = 3
+        graphicalComponentCountMax = 0
+    }
+    foreach ($key in $fixedBudgets.Keys) {
+        if ([int]$lightweight.metrics.$key -ne [int]$fixedBudgets[$key]) {
+            Fail "CONTRACT_LIGHTWEIGHT" "lightweight.metrics.$key 必须为 $($fixedBudgets[$key])"
+        }
+    }
+    $pendingBudgets = @("releaseBinaryBytesMax", "localIdleResidentBytesMax", "runnerPreflightResidentBytesMax", "linkIdleResidentBytesMax", "cliColdStartOfflineMillisMax", "directDependencyCountMax")
+    foreach ($key in $pendingBudgets) {
+        if ([string]$lightweight.metrics.$key -ne "pending-calibration") {
+            Fail "CONTRACT_LIGHTWEIGHT" "lightweight.metrics.$key 必须为 pending-calibration"
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$lightweight.pendingCalibration.$key.neededMeasurement)) {
+            Fail "CONTRACT_LIGHTWEIGHT" "lightweight.pendingCalibration.$key 缺少 neededMeasurement"
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$lightweight.pendingCalibration.$key.calibratedBy)) {
+            Fail "CONTRACT_LIGHTWEIGHT" "lightweight.pendingCalibration.$key 缺少 calibratedBy"
+        }
+    }
+    foreach ($key in (@($fixedBudgets.Keys) + $pendingBudgets)) {
+        if ([string]::IsNullOrWhiteSpace([string]$lightweight.methods.$key)) {
+            Fail "CONTRACT_LIGHTWEIGHT" "lightweight.methods.$key 缺少测法（不可执行）"
+        }
+    }
+}
+
 # 入口端口只能来自契约；加载器不得硬编码
 $entrySrc = "crates/meito-core/src/entry.rs"
 if (-not (Test-Path -LiteralPath $entrySrc)) {
@@ -653,7 +690,9 @@ $docSections = @(
     @{ File = "docs/design.md"; Start = "^###\s+10\.7\s"; End = "^##\s+11\." },
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.2\s"; End = "^##\s+5\.3\s" },
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.3\s"; End = "^##\s+5\.4\s" },
-    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.4\s"; End = "^##\s+6\." }
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.4\s"; End = "^##\s+5\.5\s" },
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.5\s"; End = "^##\s+5\.6\s" },
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.6\s"; End = "^##\s+6\." }
 )
 foreach ($section in $docSections) {
     $body = Get-DocSection $section.File $section.Start $section.End
@@ -728,5 +767,5 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义/entry 端口/acceptance 指标一致；图形入口字段为 reserved/optional，不阻塞 v1；文档数值可回溯契约，人工审计项已显式标注）" -ForegroundColor Green
+Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义/entry 端口/acceptance 指标与轻量预算一致；图形入口字段为 reserved/optional，不阻塞 v1；文档数值可回溯契约，人工审计项已显式标注）" -ForegroundColor Green
 exit 0
