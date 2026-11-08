@@ -12,10 +12,12 @@ use std::fmt;
 pub enum ErrorCode {
     Internal,
     Usage,
+    Config,
     Auth,
     ActorNotAllowed,
     Preflight,
     Bootstrap,
+    UnpinnedTool,
     Dispatch,
     QueueTimeout,
     Link,
@@ -23,6 +25,7 @@ pub enum ErrorCode {
     P2pXtcp,
     P2pTs,
     HostKey,
+    Crypto,
     Entry,
     Artifact,
     ApplyConflict,
@@ -47,10 +50,12 @@ impl ErrorCode {
         match self {
             Self::Internal => "E_INTERNAL",
             Self::Usage => "E_USAGE",
+            Self::Config => "E_CONFIG",
             Self::Auth => "E_AUTH",
             Self::ActorNotAllowed => "E_ACTOR_NOT_ALLOWED",
             Self::Preflight => "E_PREFLIGHT",
             Self::Bootstrap => "E_BOOTSTRAP",
+            Self::UnpinnedTool => "E_UNPINNED_TOOL",
             Self::Dispatch => "E_DISPATCH",
             Self::QueueTimeout => "E_QUEUE_TIMEOUT",
             Self::Link => "E_LINK",
@@ -58,6 +63,7 @@ impl ErrorCode {
             Self::P2pXtcp => "E_P2P_XTCP",
             Self::P2pTs => "E_P2P_TS",
             Self::HostKey => "E_HOSTKEY",
+            Self::Crypto => "E_CRYPTO",
             Self::Entry => "E_ENTRY",
             Self::Artifact => "E_ARTIFACT",
             Self::ApplyConflict => "E_APPLY_CONFLICT",
@@ -81,11 +87,16 @@ impl ErrorCode {
     pub fn exit_code(&self) -> u8 {
         match self {
             Self::Internal => 1,
-            Self::Usage => 2,
+            Self::Usage | Self::Config => 2,
             Self::Auth | Self::ActorNotAllowed => 3,
-            Self::Preflight | Self::Bootstrap => 4,
+            Self::Preflight | Self::Bootstrap | Self::UnpinnedTool => 4,
             Self::Dispatch | Self::QueueTimeout => 5,
-            Self::Link | Self::UdpBlocked | Self::P2pXtcp | Self::P2pTs | Self::HostKey => 6,
+            Self::Link
+            | Self::UdpBlocked
+            | Self::P2pXtcp
+            | Self::P2pTs
+            | Self::HostKey
+            | Self::Crypto => 6,
             Self::Entry => 7,
             Self::Artifact | Self::ApplyConflict => 8,
             Self::JobTimeout | Self::NoJoinTimeout => 9,
@@ -106,10 +117,12 @@ impl ErrorCode {
         match self {
             Self::Internal => "internal error",
             Self::Usage => "invalid arguments or config",
+            Self::Config => "meito.toml or tools.lock.json is missing or invalid",
             Self::Auth => "authentication or GitHub permission failure",
             Self::ActorNotAllowed => "actor is not in the allowlist",
             Self::Preflight => "local or runner preflight failed",
             Self::Bootstrap => "runner bootstrap failed",
+            Self::UnpinnedTool => "tool is marked unpinned; bootstrap refuses to install",
             Self::Dispatch => "workflow dispatch failed",
             Self::QueueTimeout => "queued job did not start in time",
             Self::Link => "coordination or encrypted link delivery failed",
@@ -117,6 +130,7 @@ impl ErrorCode {
             Self::P2pXtcp => "frp xtcp hole punching failed",
             Self::P2pTs => "Tailscale direct path failed or DERP was detected",
             Self::HostKey => "host key pin mismatch",
+            Self::Crypto => "connection package encrypt/decrypt or AEAD verification failed",
             Self::Entry => "ttyd/noVNC entry failed",
             Self::Artifact => "artifact missing or checksum mismatch",
             Self::ApplyConflict => "local apply produced conflicts",
@@ -141,10 +155,12 @@ impl ErrorCode {
         let code = match value {
             "E_INTERNAL" => Self::Internal,
             "E_USAGE" => Self::Usage,
+            "E_CONFIG" => Self::Config,
             "E_AUTH" => Self::Auth,
             "E_ACTOR_NOT_ALLOWED" => Self::ActorNotAllowed,
             "E_PREFLIGHT" => Self::Preflight,
             "E_BOOTSTRAP" => Self::Bootstrap,
+            "E_UNPINNED_TOOL" => Self::UnpinnedTool,
             "E_DISPATCH" => Self::Dispatch,
             "E_QUEUE_TIMEOUT" => Self::QueueTimeout,
             "E_LINK" => Self::Link,
@@ -152,6 +168,7 @@ impl ErrorCode {
             "E_P2P_XTCP" => Self::P2pXtcp,
             "E_P2P_TS" => Self::P2pTs,
             "E_HOSTKEY" => Self::HostKey,
+            "E_CRYPTO" => Self::Crypto,
             "E_ENTRY" => Self::Entry,
             "E_ARTIFACT" => Self::Artifact,
             "E_APPLY_CONFLICT" => Self::ApplyConflict,

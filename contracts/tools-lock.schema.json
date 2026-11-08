@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://meito.dev/contracts/tools-lock.schema.json",
+  "title": "Meito tools.lock.json",
+  "description": "远端引导依赖锁定清单；tools 为按名称索引的对象，未钉死条目标 status=unpinned，引导脚本必须拒绝安装。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["lockVersion", "tools"],
+  "properties": {
+    "lockVersion": {
+      "type": "integer",
+      "enum": [1],
+      "description": "当前唯一受支持的清单版本；更高版本必须拒绝。"
+    },
+    "tools": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": {
+          "version": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"], "format": "uri" },
+          "sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+          "status": { "type": "string", "enum": ["pinned", "unpinned"] }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "status": { "const": "pinned" } } },
+            "then": {
+              "required": ["version", "url", "sha256"],
+              "properties": {
+                "version": { "type": "string", "minLength": 1 },
+                "url": { "type": "string", "minLength": 1 },
+                "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "policy": {
+    "unpinnedMarker": "unpinned",
+    "refuseUnpinned": true,
+    "refuseInstallWhenUnpinned": true,
+    "verifySha256BeforeRun": true,
+    "forbidCurlPipeShell": true,
+    "forbiddenPatterns": [
+      "curl:*|*bash",
+      "curl:*|*sh",
+      "wget:*|*bash",
+      "wget:*|*sh"
+    ]
+  }
+}

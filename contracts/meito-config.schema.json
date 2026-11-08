@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://meito.dev/contracts/meito-config.schema.json",
+  "title": "Meito meito.toml",
+  "description": "仓库根 meito.toml 的结构；TOML 表与本节字段一一对应。缺失或字段非法时按 failClosed 处理。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["security"],
+  "properties": {
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_actors"],
+      "properties": {
+        "allowed_actors": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "udp_probe_target": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+:[0-9]{1,5}$",
+          "default": null
+        }
+      }
+    }
+  },
+  "failClosed": {
+    "missingConfig": "deny-all",
+    "missingAllowedActors": "deny-all",
+    "emptyAllowedActors": "deny-all",
+    "workflowOverride": "allowed",
+    "workflowOverrideInput": "flags.allowed_actors",
+    "workflowOverridePrecedence": "override"
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.1.0",
+  "contractVersion": "0.2.0",
   "format": "jsonl",
   "encoding": "utf-8",
   "path": "logs/session-<id>.jsonl",

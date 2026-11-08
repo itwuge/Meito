@@ -1,0 +1,58 @@
+{
+  "contractVersion": "0.2.0",
+  "purpose": "runner 侧加密连接包的唯一格式定义；meito-link 只存密文，不解析、不记录",
+  "magic": "MEITO1",
+  "magicBytes": 6,
+  "formatVersion": 1,
+  "algorithm": {
+    "id": "x25519-xchacha20poly1305",
+    "idByte": 0,
+    "keyExchange": "x25519",
+    "aead": "xchacha20-poly1305",
+    "implementation": "rustcrypto",
+    "aad": "none"
+  },
+  "algorithmIds": [
+    { "id": 0, "name": "x25519-xchacha20poly1305" }
+  ],
+  "keyPair": {
+    "generatedOn": "runner",
+    "lifetime": "per-job",
+    "reuse": false,
+    "privateKeyExport": false,
+    "zeroizeAfterUse": true,
+    "publicKeyTransport": "workflow input channel_public_key"
+  },
+  "encoding": {
+    "container": "binary",
+    "integerEncoding": "single-byte",
+    "wireEncoding": "base64url-no-padding",
+    "plaintextEncoding": "utf-8",
+    "padding": "none"
+  },
+  "layout": [
+    { "order": 1, "name": "magic", "type": "bytes", "bytes": 6 },
+    { "order": 2, "name": "format_version", "type": "u8", "bytes": 1 },
+    { "order": 3, "name": "algorithm_id", "type": "u8", "bytes": 1 },
+    { "order": 4, "name": "ephemeral_public_key", "type": "bytes", "bytes": 32 },
+    { "order": 5, "name": "nonce", "type": "bytes", "bytes": 24 },
+    { "order": 6, "name": "ciphertext", "type": "bytes", "bytes": "variable", "includesTag": true }
+  ],
+  "plaintextFields": [
+    "version",
+    "session_id",
+    "host_key_pin",
+    "p2p",
+    "entry",
+    "read_token",
+    "write_token",
+    "expires_at"
+  ],
+  "serverHandling": {
+    "store": "ciphertext-only",
+    "parse": false,
+    "log": false,
+    "retention": "until-session-end",
+    "maxCiphertextBytes": 16384
+  }
+}

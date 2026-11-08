@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.1.0",
+  "contractVersion": "0.2.0",
   "exitCodes": [
     { "code": 0, "meaning": "success" },
     { "code": 1, "meaning": "internal error" },
@@ -18,10 +18,12 @@
   "codes": [
     { "code": "E_INTERNAL", "exitCode": 1, "message": "internal error" },
     { "code": "E_USAGE", "exitCode": 2, "message": "invalid arguments or config" },
+    { "code": "E_CONFIG", "exitCode": 2, "message": "meito.toml or tools.lock.json is missing or invalid" },
     { "code": "E_AUTH", "exitCode": 3, "message": "authentication or GitHub permission failure" },
     { "code": "E_ACTOR_NOT_ALLOWED", "exitCode": 3, "message": "actor is not in the allowlist" },
     { "code": "E_PREFLIGHT", "exitCode": 4, "message": "local or runner preflight failed" },
     { "code": "E_BOOTSTRAP", "exitCode": 4, "message": "runner bootstrap failed" },
+    { "code": "E_UNPINNED_TOOL", "exitCode": 4, "message": "tool is marked unpinned; bootstrap refuses to install" },
     { "code": "E_DISPATCH", "exitCode": 5, "message": "workflow dispatch failed" },
     { "code": "E_QUEUE_TIMEOUT", "exitCode": 5, "message": "queued job did not start in time" },
     { "code": "E_LINK", "exitCode": 6, "message": "coordination or encrypted link delivery failed" },
@@ -29,6 +31,7 @@
     { "code": "E_P2P_XTCP", "exitCode": 6, "message": "frp xtcp hole punching failed" },
     { "code": "E_P2P_TS", "exitCode": 6, "message": "Tailscale direct path failed or DERP was detected" },
     { "code": "E_HOSTKEY", "exitCode": 6, "message": "host key pin mismatch" },
+    { "code": "E_CRYPTO", "exitCode": 6, "message": "connection package encrypt/decrypt or AEAD verification failed" },
     { "code": "E_ENTRY", "exitCode": 7, "message": "ttyd/noVNC entry failed" },
     { "code": "E_ARTIFACT", "exitCode": 8, "message": "artifact missing or checksum mismatch" },
     { "code": "E_APPLY_CONFLICT", "exitCode": 8, "message": "local apply produced conflicts" },

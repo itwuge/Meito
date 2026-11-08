@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.1.0",
+  "contractVersion": "0.2.0",
   "template": "templates/meito-session.yml",
   "trigger": "workflow_dispatch",
   "permissions": {
@@ -8,6 +8,9 @@
   },
   "timeoutMinutes": 360,
   "sessionMaxMinutes": 300,
+  "configContract": "contracts/meito-config.schema.json",
+  "toolsLockContract": "contracts/tools-lock.schema.json",
+  "udpProbeContract": "contracts/udp-probe.json",
   "inputs": [
     { "name": "session_id", "type": "string", "required": true, "maxLength": 64 },
     { "name": "ref", "type": "string", "required": true, "default": "main", "maxLength": 255 },
@@ -15,14 +18,16 @@
     { "name": "idle_minutes", "type": "string", "required": true, "default": "10", "min": 1, "max": 300 },
     { "name": "p2p_provider", "type": "enum", "required": true, "default": "frp_xtcp", "enum": ["frp_xtcp", "tailscale_direct"] },
     { "name": "entry", "type": "enum", "required": true, "default": "terminal", "enum": ["terminal", "graphical", "both"] },
-    { "name": "channel", "type": "string", "required": true, "maxLength": 128 },
-    { "name": "artifact_spec", "type": "string", "required": true, "maxLength": 1000 },
-    { "name": "flags", "type": "json", "required": true, "maxLength": 1000, "fields": ["share_mode", "read_only", "no_join_timeout_minutes", "allow_graphical", "checkpoint_minutes"] },
-    { "name": "meito_version", "type": "string", "required": true, "maxLength": 64 }
+    { "name": "channel", "type": "string", "required": true, "maxLength": 128, "description": "不透明通道 id；不得包含 write_token 或 public_key" },
+    { "name": "channel_write_token", "type": "string", "required": true, "maxLength": 128, "description": "一次性写 token；过期即失效" },
+    { "name": "channel_public_key", "type": "string", "required": true, "maxLength": 64, "description": "本地临时 X25519 公钥，base64url 无填充" },
+    { "name": "flags", "type": "json", "required": true, "maxLength": 1000, "fields": ["artifact_spec", "meito_version", "allowed_actors", "share_mode", "read_only", "no_join_timeout_minutes", "allow_graphical", "checkpoint_minutes"] }
   ],
   "outputs": {
     "connectionPackage": {
       "delivery": "meito-link encrypted channel",
+      "contract": "contracts/connection-package.json",
+      "algorithmId": "x25519-xchacha20poly1305",
       "inArtifact": false,
       "inJobSummary": false,
       "inLog": false,

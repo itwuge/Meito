@@ -1,15 +1,28 @@
 {
-  "contractVersion": "0.1.0",
+  "contractVersion": "0.2.0",
   "status": "frozen",
   "frozenAt": "2026-11-08",
   "project": "meito",
+  "supersedes": "0.1.0",
+  "revisions": [
+    {
+      "version": "0.2.0",
+      "date": "2026-11-08",
+      "reason": "M3 开发线因加密、UDP 探测、actor 配置、依赖锁定与 channel 语义空白停滞；补齐机器可读契约",
+      "impact": ["cli.json", "workflow.json", "error-codes.json", "connection-package.json", "udp-probe.json", "meito-config.schema.json", "tools-lock.schema.json", "meito-core", "templates/meito-session.yml"]
+    }
+  ],
   "files": [
     "cli.json",
     "log.json",
     "workflow.json",
     "state-machine.json",
     "error-codes.json",
-    "artifact-manifest.schema.json"
+    "artifact-manifest.schema.json",
+    "connection-package.json",
+    "udp-probe.json",
+    "meito-config.schema.json",
+    "tools-lock.schema.json"
   ],
   "byoTurn": {
     "status": "reserved",

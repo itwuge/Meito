@@ -6,10 +6,22 @@
 // ===== 契约常量 =====
 
 /// 当前冻结的契约版本，必须与 `contracts/contract-version.json` 一致。
-pub const CONTRACT_VERSION: &str = "0.1.0";
+pub const CONTRACT_VERSION: &str = "0.2.0";
 
 /// 会话日志路径前缀，完整路径为 `logs/session-<id>.jsonl`。
 pub const SESSION_LOG_PATH_PREFIX: &str = "logs/session-";
+
+/// 连接包 magic，长度必须与 `contracts/connection-package.json` 一致。
+pub const CONNECTION_PACKAGE_MAGIC: &str = "MEITO1";
+
+/// 连接包格式版本。
+pub const CONNECTION_PACKAGE_FORMAT_VERSION: u8 = 1;
+
+/// 唯一允许的加密算法标识。
+pub const CRYPTO_ALGORITHM_ID: &str = "x25519-xchacha20poly1305";
+
+/// 连接包头部写入的算法 id 字节。
+pub const CRYPTO_ALGORITHM_ID_BYTE: u8 = 0;
 
 /// 环境台账路径前缀，完整路径为 `logs/env-session-<id>.json`。
 pub const ENV_LEDGER_PATH_PREFIX: &str = "logs/env-session-";

@@ -1,0 +1,33 @@
+{
+  "contractVersion": "0.2.0",
+  "purpose": "runner 出站 UDP 可达性探测；只探测不承载会话字节",
+  "target": {
+    "source": "meito.toml",
+    "section": "network",
+    "key": "udp_probe_target",
+    "format": "host:port",
+    "default": null,
+    "requiredWhenProbeEnabled": true
+  },
+  "request": {
+    "magic": "MEITOUDP",
+    "magicBytes": 8,
+    "nonceBytes": 8,
+    "nonceSource": "secure-random"
+  },
+  "response": {
+    "magic": "MEITOUDP",
+    "echoesNonce": true
+  },
+  "timeout": {
+    "attempts": 3,
+    "perAttemptMs": 1000
+  },
+  "listener": {
+    "provider": "meito-link",
+    "protocol": "udp",
+    "defaultEnabled": false,
+    "purpose": "self-check-only",
+    "forwardsSessionBytes": false
+  }
+}
