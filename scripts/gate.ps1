@@ -1086,7 +1086,7 @@ function Invoke-Rule-CommandVersionBump {
         if ($LASTEXITCODE -ne 0 -or ([string]$inside).Trim() -ne "true") { Write-Info "R-D-9: not a git repo; skipped."; return }
         $baseText = (& git -C $script:RootFull show ("{0}:{1}" -f $BaseRef, $script:Config.version.cargoManifest) 2>$null)
         if ($LASTEXITCODE -ne 0 -or $null -eq $baseText) { Write-Info ("R-D-9: cannot read " + $BaseRef + ":" + $script:Config.version.cargoManifest + "; skipped."); return }
-        $text = ([string]$baseText -join "`n")
+        $text = ($baseText -join "`n")
         $m = [regex]::Match($text, '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"')
         if (-not $m.Success) { $m = [regex]::Match($text, '(?ms)^\[package\].*?^version\s*=\s*"([^"]+)"') }
         if (-not $m.Success) { Write-Info "R-D-9: baseline version not found; skipped."; return }
