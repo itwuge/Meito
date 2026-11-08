@@ -420,10 +420,11 @@ function Get-ChangedSet {
     $git = Get-Command git -ErrorAction SilentlyContinue
     if ($null -eq $git) { Fail-Script "-Changed requires git, but git was not found in PATH." }
     $outputs = @()
-    $outputs += (& git -C $script:RootFull diff --name-only ("{0}...HEAD" -f $BaseRef) 2>$null)
-    $outputs += (& git -C $script:RootFull diff --name-only 2>$null)
-    $outputs += (& git -C $script:RootFull diff --cached --name-only 2>$null)
-    $outputs += (& git -C $script:RootFull ls-files --others --exclude-standard 2>$null)
+    # core.quotepath=false：避免非 ASCII 路径被输出为八进制转义，导致路径匹配失效。
+    $outputs += (& git -C $script:RootFull -c core.quotepath=false diff --name-only ("{0}...HEAD" -f $BaseRef) 2>$null)
+    $outputs += (& git -C $script:RootFull -c core.quotepath=false diff --name-only 2>$null)
+    $outputs += (& git -C $script:RootFull -c core.quotepath=false diff --cached --name-only 2>$null)
+    $outputs += (& git -C $script:RootFull -c core.quotepath=false ls-files --others --exclude-standard 2>$null)
     foreach ($line in $outputs) {
         if ($null -eq $line) { continue }
         $line = ([string]$line).Trim()

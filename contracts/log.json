@@ -1,0 +1,97 @@
+{
+  "contractVersion": "0.1.0",
+  "format": "jsonl",
+  "encoding": "utf-8",
+  "path": "logs/session-<id>.jsonl",
+  "envLedgerPath": "logs/env-session-<id>.json",
+  "sessionId": { "format": "uuid-v4", "required": true },
+  "requiredFields": [
+    { "name": "ts", "type": "string", "format": "date-time" },
+    { "name": "level", "type": "string", "enum": ["info", "warn", "error", "debug", "trace"] },
+    { "name": "session_id", "type": "string", "format": "uuid-v4" },
+    {
+      "name": "stage",
+      "type": "string",
+      "enum": [
+        "idle",
+        "preflight",
+        "dispatching",
+        "queued",
+        "runner_starting",
+        "p2p_connecting",
+        "link_ready",
+        "waiting_for_join",
+        "entry_starting",
+        "connected",
+        "reconnecting",
+        "ending",
+        "collecting",
+        "done",
+        "cancelled",
+        "failed_preflight",
+        "failed_dispatch",
+        "failed_queue_timeout",
+        "failed_bootstrap",
+        "failed_p2p",
+        "failed_link",
+        "failed_entry",
+        "failed_collect",
+        "no_direct_path",
+        "orphaned"
+      ]
+    },
+    { "name": "event", "type": "string", "pattern": "^[a-z0-9_.-]+$" },
+    { "name": "error_code", "type": "string", "allowEmpty": true }
+  ],
+  "optionalFields": [
+    { "name": "run_id", "type": "string" },
+    { "name": "duration_ms", "type": "number" },
+    { "name": "evidence", "type": "string" },
+    { "name": "entry", "type": "string", "enum": ["terminal", "graphical", "both"] },
+    { "name": "p2p_provider", "type": "string", "enum": ["frp_xtcp", "tailscale_direct"] },
+    { "name": "tool_version", "type": "string" }
+  ],
+  "levelSwitch": {
+    "flag": "--log-level",
+    "env": "MEITO_LOG",
+    "allowed": ["info", "debug", "trace"],
+    "default": "info",
+    "traceRequiresConfirmation": true
+  },
+  "redaction": {
+    "replacement": "[REDACTED]",
+    "applyBeforeWrite": true,
+    "keys": [
+      "token",
+      "authorization",
+      "private_key",
+      "secret",
+      "password",
+      "session_connect_string",
+      "frps_token",
+      "tailscale_authkey",
+      "oauth_code",
+      "turn_credential"
+    ]
+  },
+  "prohibited": ["print", "println!", "console.log"],
+  "envLedgerFields": [
+    "session_id",
+    "run_id",
+    "image",
+    "runner_label",
+    "os",
+    "meito_version",
+    "frpc_version",
+    "ttyd_version",
+    "x11vnc_version",
+    "websockify_version",
+    "p2p_provider",
+    "p2p_state",
+    "udp_probe",
+    "ice_candidates",
+    "entry_ports",
+    "exit_code",
+    "error_code"
+  ]
+}

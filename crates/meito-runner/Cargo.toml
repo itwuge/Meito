@@ -1,0 +1,9 @@
+[package]
+name = "meito-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+meito-core = { path = "../meito-core" }
+tracing = "0.1"

@@ -1,0 +1,43 @@
+{
+  "contractVersion": "0.1.0",
+  "exitCodes": [
+    { "code": 0, "meaning": "success" },
+    { "code": 1, "meaning": "internal error" },
+    { "code": 2, "meaning": "usage or config error" },
+    { "code": 3, "meaning": "authentication or authorization error" },
+    { "code": 4, "meaning": "preflight or bootstrap error" },
+    { "code": 5, "meaning": "dispatch or queue error" },
+    { "code": 6, "meaning": "link or P2P or host-key error" },
+    { "code": 7, "meaning": "entry error" },
+    { "code": 8, "meaning": "artifact or apply error" },
+    { "code": 9, "meaning": "timeout" },
+    { "code": 10, "meaning": "cancelled" },
+    { "code": 11, "meaning": "web has no direct path or relay detected" },
+    { "code": 12, "meaning": "logs unavailable or orphan session" }
+  ],
+  "codes": [
+    { "code": "E_INTERNAL", "exitCode": 1, "message": "internal error" },
+    { "code": "E_USAGE", "exitCode": 2, "message": "invalid arguments or config" },
+    { "code": "E_AUTH", "exitCode": 3, "message": "authentication or GitHub permission failure" },
+    { "code": "E_ACTOR_NOT_ALLOWED", "exitCode": 3, "message": "actor is not in the allowlist" },
+    { "code": "E_PREFLIGHT", "exitCode": 4, "message": "local or runner preflight failed" },
+    { "code": "E_BOOTSTRAP", "exitCode": 4, "message": "runner bootstrap failed" },
+    { "code": "E_DISPATCH", "exitCode": 5, "message": "workflow dispatch failed" },
+    { "code": "E_QUEUE_TIMEOUT", "exitCode": 5, "message": "queued job did not start in time" },
+    { "code": "E_LINK", "exitCode": 6, "message": "coordination or encrypted link delivery failed" },
+    { "code": "E_UDP_BLOCKED", "exitCode": 6, "message": "runner outbound UDP is blocked" },
+    { "code": "E_P2P_XTCP", "exitCode": 6, "message": "frp xtcp hole punching failed" },
+    { "code": "E_P2P_TS", "exitCode": 6, "message": "Tailscale direct path failed or DERP was detected" },
+    { "code": "E_HOSTKEY", "exitCode": 6, "message": "host key pin mismatch" },
+    { "code": "E_ENTRY", "exitCode": 7, "message": "ttyd/noVNC entry failed" },
+    { "code": "E_ARTIFACT", "exitCode": 8, "message": "artifact missing or checksum mismatch" },
+    { "code": "E_APPLY_CONFLICT", "exitCode": 8, "message": "local apply produced conflicts" },
+    { "code": "E_JOB_TIMEOUT", "exitCode": 9, "message": "six-hour job limit or watchdog timeout" },
+    { "code": "E_NO_JOIN_TIMEOUT", "exitCode": 9, "message": "no user joined before the join timeout" },
+    { "code": "E_CANCEL", "exitCode": 10, "message": "session cancelled" },
+    { "code": "E_WEB_NO_DIRECT_PATH", "exitCode": 11, "message": "browser has no direct ICE path; TURN is disabled" },
+    { "code": "E_WEB_RELAY_USED", "exitCode": 11, "message": "relay candidate detected; session refused" },
+    { "code": "E_LOGS_UNAVAILABLE", "exitCode": 12, "message": "logs could not be retrieved" },
+    { "code": "E_ORPHAN", "exitCode": 12, "message": "orphan session detected" }
+  ]
+}

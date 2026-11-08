@@ -2,7 +2,7 @@
 
 Meito 是一个在 GitHub Actions 托管 runner 上获得**点对点交互会话**的自研工具，用来替代已失效的 tmate，在 runner 上跑 `make menuconfig` 等必须人工操作的配置工作，并把 `.config` / `defconfig` 带回本地仓库。
 
-当前状态：**设计阶段（M0）**，尚未进入实现。runner 内行为、UDP 可达性、WebRTC 可达性均未实测，任何“已通过”都必须有 run_id、日志、artifact 或服务器计数证据。
+当前状态：**接口冻结阶段完成（M1）**。`contracts/` 已冻结、Rust workspace 与两个外壳 stub 可编译；实现（M2 起）尚未开始。runner 内行为、UDP 可达性、WebRTC 可达性均未实测，任何“已通过”都必须有 run_id、日志、artifact 或服务器计数证据。
 
 ## 文档入口
 

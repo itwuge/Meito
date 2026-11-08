@@ -1,0 +1,21 @@
+{
+  "contractVersion": "0.1.0",
+  "status": "frozen",
+  "frozenAt": "2026-11-08",
+  "project": "meito",
+  "files": [
+    "cli.json",
+    "log.json",
+    "workflow.json",
+    "state-machine.json",
+    "error-codes.json",
+    "artifact-manifest.schema.json"
+  ],
+  "byoTurn": {
+    "status": "reserved",
+    "enabled": false,
+    "decision": "pending",
+    "decisionId": "D-4",
+    "rule": "接口位预留、默认关闭、待用户拍板，不得擅自填默认值"
+  }
+}

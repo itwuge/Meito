@@ -17,6 +17,14 @@ function Add-Check([string]$Message) {
     $script:checks.Add($Message)
 }
 
+# 检查 0：冻结契约（contracts/ 是后续并行开工的唯一依据）
+& powershell -NoProfile -ExecutionPolicy Bypass -File "$root\scripts\contract-check.ps1"
+if ($LASTEXITCODE -ne 0) {
+    Add-Failure "ARCH_CONTRACT" "contract-check 未通过（退出码 $LASTEXITCODE）"
+} else {
+    Add-Check "冻结契约"
+}
+
 # 检查 1：禁止 TURN / 中继配置出现在网页外壳
 $webPaths = @("$root\web", "$root\crates\meito-web")
 foreach ($p in $webPaths) {
@@ -75,7 +83,7 @@ Add-Check "日志路径约定"
 if ($coreFiles) {
     foreach ($f in $coreFiles) {
         $head = Get-Content $f.FullName -TotalCount 25 -ErrorAction SilentlyContinue
-        if (-not ($head | Select-String -Pattern "\/\/!" -SimpleMatch)) {
+        if (-not ($head | Select-String -Pattern "//!" -SimpleMatch)) {
             Add-Failure "ARCH_NOTE" "$($f.FullName) 首 25 行缺少 //! 文件头"
         }
     }

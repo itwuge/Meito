@@ -105,7 +105,7 @@ Meito 要在 GitHub 托管 runner 上获得一个可交互会话，用于 `make 
 | SC-15 | 新用户按 README 快速开始可完成 | 另一台干净机器按 README 操作，15 min 内到达入口；记录实际失败点 | 未验证 |
 | SC-16 | 网页版只走 WebRTC DataChannel + STUN，无 TURN | 浏览器 `RTCPeerConnection.getStats()` 中 selected candidate pair 为 `host`/`srflx`，无 `relay`；配置中 TURN URL 为空；强制禁用 TURN 后仍能连通，或明确返回 `E_WEB_NO_DIRECT_PATH` | 未验证 |
 | SC-17 | 一套内核、两个外壳 | `scripts/arch-check.ps1` 退出 0；`crates/meito-web` 与 `crates/meito-cli` 不含会话状态机/artifact 清单/P2P 策略的重复定义；两个外壳都依赖同一 `meito-core` 公共接口 | 未验证 |
-| SC-18 | 接口冻结可判定 | `docs/接口冻结.md` 记录公共 trait/命令/事件/日志字段/错误码/版本；冻结后两个外壳以 stub 编译通过；冻结后修改有变更记录与版本递增 | 未验证 |
+| SC-18 | 接口冻结可判定 | `docs/接口冻结.md` 记录公共 trait/命令/事件/日志字段/错误码/版本；冻结后两个外壳以 stub 编译通过；冻结后修改有变更记录与版本递增 | 本次已验证：`contracts/` 0.1.0 frozen；`cargo check/clippy/test` 通过；`contract-check` 与 `arch-check` 退出 0（见变更记录 M1） |
 | SC-19 | 可写/只读双链接 | 只读链接无法执行输入、无法保存文件；写链接需一次性 token；无人加入超过 `no_join_timeout` 自动取消并上传空会话日志 | 未验证 |
 | SC-20 | 网页版“连不上”可解释 | 对称 NAT/UDP 被封时返回 `E_WEB_NO_DIRECT_PATH`，页面显示原因、已尝试的 ICE 类型、转本地版的命令；文案不出现“任意网络可连” | 未验证 |
 | SC-21 | 连接串进 Job Summary 但不泄密 | Job Summary 只含 session_id、状态、入口类型、过期时间、只读/写链接标记；`artifact_guard` 扫描连接串/令牌命中数为 0 | 未验证 |

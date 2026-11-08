@@ -1,0 +1,172 @@
+{
+  "contractVersion": "0.1.0",
+  "binary": "meito",
+  "globalOptions": [
+    { "name": "--repo", "type": "string", "required": false, "env": "MEITO_REPO", "description": "owner/repo" },
+    { "name": "--config", "type": "path", "required": false, "env": "MEITO_CONFIG", "description": "repo-level meito.toml" },
+    { "name": "--session", "type": "string", "required": false, "description": "session id or latest" },
+    { "name": "--log-level", "type": "string", "required": false, "env": "MEITO_LOG", "enum": ["info", "debug", "trace"], "default": "info" },
+    { "name": "--json", "type": "bool", "required": false, "description": "machine-readable output" },
+    { "name": "--version", "type": "bool", "required": false, "description": "print version" },
+    { "name": "--help", "type": "bool", "required": false, "description": "print help" }
+  ],
+  "commands": [
+    {
+      "name": "init",
+      "summary": "install workflow template into the target repository",
+      "args": [
+        { "name": "--template", "type": "path", "required": false },
+        { "name": "--force", "type": "bool", "required": false }
+      ]
+    },
+    {
+      "name": "doctor",
+      "summary": "read-only environment and permission diagnosis",
+      "args": [
+        { "name": "--deep", "type": "bool", "required": false },
+        { "name": "--json", "type": "bool", "required": false }
+      ]
+    },
+    {
+      "name": "up",
+      "summary": "start a session and wait for an entry",
+      "args": [
+        { "name": "--ref", "type": "string", "required": false, "default": "main" },
+        { "name": "--max", "type": "duration", "required": false, "default": "60m", "max": "300m" },
+        { "name": "--idle", "type": "duration", "required": false, "default": "10m" },
+        { "name": "--entry", "type": "string", "required": false, "enum": ["terminal", "graphical", "both"], "default": "terminal" },
+        { "name": "--p2p", "type": "string", "required": false, "enum": ["frp_xtcp", "tailscale_direct"], "default": "frp_xtcp" },
+        { "name": "--share", "type": "string", "required": false, "enum": ["none", "read_only", "write"], "default": "none" },
+        { "name": "--no-join-timeout", "type": "duration", "required": false, "default": "5m" }
+      ]
+    },
+    {
+      "name": "web",
+      "summary": "start the local control endpoint and open the hosted single page",
+      "args": [
+        { "name": "--static", "type": "url", "required": false },
+        { "name": "--control", "type": "url", "required": false },
+        { "name": "--open", "type": "bool", "required": false }
+      ]
+    },
+    {
+      "name": "share",
+      "summary": "create read-only or write link with expiry",
+      "args": [
+        { "name": "--read-only", "type": "bool", "required": false, "default": true },
+        { "name": "--ttl", "type": "duration", "required": false, "default": "30m" },
+        { "name": "--no-join-timeout", "type": "duration", "required": false, "default": "5m" }
+      ]
+    },
+    {
+      "name": "status",
+      "summary": "print state machine, run id, entry URLs and last heartbeat",
+      "args": [
+        { "name": "--json", "type": "bool", "required": false }
+      ]
+    },
+    {
+      "name": "connect",
+      "summary": "reconnect an existing session",
+      "args": []
+    },
+    {
+      "name": "entry",
+      "summary": "switch, open or stop an entry",
+      "args": [
+        { "name": "action", "type": "enum", "required": true, "enum": ["switch", "open", "stop"] },
+        { "name": "target", "type": "enum", "required": false, "enum": ["terminal", "graphical", "both"] }
+      ]
+    },
+    {
+      "name": "pull",
+      "summary": "download artifact, verify checksums and apply diff",
+      "args": [
+        { "name": "--apply", "type": "bool", "required": false },
+        { "name": "--dest", "type": "path", "required": false, "default": "." },
+        { "name": "--patch-only", "type": "bool", "required": false },
+        { "name": "--stash", "type": "bool", "required": false }
+      ]
+    },
+    {
+      "name": "kconfig",
+      "summary": "non-interactive config change and savedefconfig",
+      "args": [
+        { "name": "--from", "type": "path", "required": false },
+        { "name": "--set", "type": "string", "required": false, "repeatable": true },
+        { "name": "--file", "type": "path", "required": false },
+        { "name": "--save", "type": "path", "required": false }
+      ]
+    },
+    {
+      "name": "down",
+      "summary": "end session, redact secrets, revoke channel",
+      "args": [
+        { "name": "--force", "type": "bool", "required": false },
+        { "name": "--rotate", "type": "bool", "required": false }
+      ]
+    },
+    {
+      "name": "logs",
+      "summary": "view or follow local and runner logs",
+      "args": [
+        { "name": "--stage", "type": "string", "required": false },
+        { "name": "--follow", "type": "bool", "required": false }
+      ]
+    },
+    {
+      "name": "env",
+      "summary": "print the environment ledger",
+      "args": [
+        { "name": "--json", "type": "bool", "required": false }
+      ]
+    },
+    {
+      "name": "clean",
+      "summary": "clean local state, old logs and orphan runs",
+      "args": [
+        { "name": "--older-than", "type": "duration", "required": false, "default": "7d" },
+        { "name": "--orphans", "type": "bool", "required": false },
+        { "name": "--dry-run", "type": "bool", "required": false }
+      ]
+    },
+    {
+      "name": "p2p",
+      "summary": "P2P diagnosis and no-relay proof",
+      "args": [
+        { "name": "action", "type": "enum", "required": true, "enum": ["verify", "bench", "provider"] },
+        { "name": "--bench", "type": "string", "required": false },
+        { "name": "--repeat", "type": "int", "required": false, "min": 1 }
+      ]
+    },
+    {
+      "name": "config",
+      "summary": "read, write or validate config",
+      "args": [
+        { "name": "action", "type": "enum", "required": true, "enum": ["get", "set", "validate"] },
+        { "name": "--key", "type": "string", "required": false },
+        { "name": "--value", "type": "string", "required": false }
+      ]
+    }
+  ],
+  "environment": [
+    { "name": "MEITO_REPO", "secret": false, "description": "owner/repo" },
+    { "name": "MEITO_CONFIG", "secret": false, "description": "config path" },
+    { "name": "MEITO_LOG", "secret": false, "enum": ["info", "debug", "trace"] },
+    { "name": "MEITO_LINK_URL", "secret": false, "description": "coordination service URL" },
+    { "name": "MEITO_FRPS_TOKEN", "secret": true, "redact": true },
+    { "name": "MEITO_TAILSCALE_AUTHKEY", "secret": true, "redact": true },
+    { "name": "MEITO_BUILD_DIR", "secret": false },
+    { "name": "GH_TOKEN", "secret": true, "redact": true },
+    { "name": "MEITO_TURN_URL", "secret": false, "status": "reserved", "enabledByDefault": false },
+    { "name": "MEITO_TURN_USERNAME", "secret": false, "status": "reserved", "enabledByDefault": false },
+    { "name": "MEITO_TURN_CREDENTIAL", "secret": true, "redact": true, "status": "reserved", "enabledByDefault": false }
+  ],
+  "exitCodeSemantics": "See contracts/error-codes.json. CLI must map every error code to the declared exit code and never invent a new code without a contract bump.",
+  "byoTurn": {
+    "status": "reserved",
+    "enabled": false,
+    "decision": "pending",
+    "decisionId": "D-4"
+  }
+}

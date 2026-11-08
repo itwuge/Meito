@@ -1,0 +1,65 @@
+{
+  "contractVersion": "0.1.0",
+  "template": "templates/meito-session.yml",
+  "trigger": "workflow_dispatch",
+  "permissions": {
+    "contents": "read",
+    "actions": "read"
+  },
+  "timeoutMinutes": 360,
+  "sessionMaxMinutes": 300,
+  "inputs": [
+    { "name": "session_id", "type": "string", "required": true, "maxLength": 64 },
+    { "name": "ref", "type": "string", "required": true, "default": "main", "maxLength": 255 },
+    { "name": "max_minutes", "type": "string", "required": true, "default": "60", "min": 1, "max": 300 },
+    { "name": "idle_minutes", "type": "string", "required": true, "default": "10", "min": 1, "max": 300 },
+    { "name": "p2p_provider", "type": "enum", "required": true, "default": "frp_xtcp", "enum": ["frp_xtcp", "tailscale_direct"] },
+    { "name": "entry", "type": "enum", "required": true, "default": "terminal", "enum": ["terminal", "graphical", "both"] },
+    { "name": "channel", "type": "string", "required": true, "maxLength": 128 },
+    { "name": "artifact_spec", "type": "string", "required": true, "maxLength": 1000 },
+    { "name": "flags", "type": "json", "required": true, "maxLength": 1000, "fields": ["share_mode", "read_only", "no_join_timeout_minutes", "allow_graphical", "checkpoint_minutes"] },
+    { "name": "meito_version", "type": "string", "required": true, "maxLength": 64 }
+  ],
+  "outputs": {
+    "connectionPackage": {
+      "delivery": "meito-link encrypted channel",
+      "inArtifact": false,
+      "inJobSummary": false,
+      "inLog": false,
+      "fields": ["version", "session_id", "host_key_pin", "p2p", "entry", "read_token", "write_token", "expires_at"]
+    },
+    "readLink": {
+      "format": "meito://session/<session_id>?role=read&token=<redacted>",
+      "token": "one-time read token",
+      "expires": "read_link_ttl_minutes",
+      "inJobSummary": "presence-only"
+    },
+    "writeLink": {
+      "format": "meito://session/<session_id>?role=write&token=<redacted>",
+      "token": "one-time write token",
+      "expires": "write_link_ttl_minutes",
+      "inJobSummary": "presence-only"
+    },
+    "jobSummary": {
+      "fields": ["session_id", "status", "entry", "read_link_present", "write_link_present", "expires_at", "artifact_name"],
+      "forbidden": ["connection_package", "token", "private_key", "secret"]
+    },
+    "artifactManifest": {
+      "path": "artifact-manifest.json",
+      "schema": "contracts/artifact-manifest.schema.json",
+      "checksum": "sha256"
+    }
+  },
+  "artifactGuard": {
+    "pathWhitelist": ["*.config", "*.defconfig", "*.diff", "*.patch", "*.json", "*.log", "*.txt"],
+    "scanPatterns": ["token=", "BEGIN OPENSSH PRIVATE KEY", "MEITO_FRPS_TOKEN", "Authorization:"],
+    "blockOnHit": true
+  },
+  "byoTurn": {
+    "status": "reserved",
+    "enabled": false,
+    "interfaceReserved": true,
+    "decision": "pending",
+    "decisionId": "D-4"
+  }
+}

@@ -90,7 +90,7 @@
     "sourceGlobs": ["crates/*/src/**/*.rs"],
     "requireDocForPublic": true,
     "requireParamSections": true,
-    "paramSectionRegex": "^\\s*(//|///)?\\s*#?\\s*(参数|Arguments|Parameters|Args)",
+    "paramSectionRegex": "(//+\\s*)?#\\s*(参数|Arguments|Parameters|Args)",
     "componentMarkerRegex": "^\\s*//\\s*=====\\s*[^=]+\\s*=====\\s*$",
     "controlMarkerRegex": "^\\s*//\\s*=====",
     "minLinesForSection": 200,

@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/meito-core",
+    "crates/meito-cli",
+    "crates/meito-runner",
+    "crates/meito-web",
+    "crates/meito-link",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"

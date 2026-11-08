@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://meito.dev/contracts/artifact-manifest.schema.json",
+  "title": "Meito Artifact Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestVersion",
+    "sessionId",
+    "runId",
+    "baseCommit",
+    "createdAt",
+    "files",
+    "checksums",
+    "guardPassed"
+  ],
+  "properties": {
+    "manifestVersion": { "type": "string", "enum": ["1.0.0"] },
+    "sessionId": { "type": "string", "format": "uuid" },
+    "runId": { "type": "string", "minLength": 1 },
+    "baseCommit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "files": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "size"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "size": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "patches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "logs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionLog", "envLedger"],
+      "properties": {
+        "sessionLog": { "type": "string" },
+        "envLedger": { "type": "string" }
+      }
+    },
+    "checksums": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filesSha256", "archiveSha256"],
+      "properties": {
+        "filesSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "archiveSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "guardPassed": { "type": "boolean" },
+    "guardViolations": { "type": "array", "items": { "type": "string" } }
+  }
+}
