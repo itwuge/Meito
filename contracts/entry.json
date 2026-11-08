@@ -1,0 +1,31 @@
+{
+  "contractVersion": "0.3.2",
+  "purpose": "入口监听端口与回环绑定约束；代码、脚本与文档必须从这里读取，不得另写数值",
+  "bind": {
+    "address": "127.0.0.1",
+    "loopbackOnly": true,
+    "allowWildcardBind": false,
+    "wildcardAddress": "0.0.0.0"
+  },
+  "ports": {
+    "terminal": 7681,
+    "graphical": 6080,
+    "vnc": 5900
+  },
+  "terminal": {
+    "implementation": "ttyd",
+    "writeFlag": "-W",
+    "singleClientFlag": "-m 1",
+    "originCheckFlag": "-O"
+  },
+  "graphical": {
+    "implementation": "Xvfb + x11vnc + websockify + noVNC",
+    "framebuffer": {
+      "width": 1280,
+      "height": 800,
+      "depth": 24
+    },
+    "vncPasswordChars": 8,
+    "vncPasswordDesOnly": true
+  }
+}

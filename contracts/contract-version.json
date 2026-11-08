@@ -1,10 +1,16 @@
 {
-  "contractVersion": "0.3.1",
+  "contractVersion": "0.3.2",
   "status": "frozen",
   "frozenAt": "2026-11-08",
   "project": "meito",
-  "supersedes": "0.3.0",
+  "supersedes": "0.3.1",
   "revisions": [
+    {
+      "version": "0.3.2",
+      "date": "2026-11-08",
+      "reason": "入口端口 7681/6080 与 SC-01 一类验收指标仍在散文里，代码与验收脚本无契约来源；文档数值回溯范围需扩到端口与 SC 段落",
+      "impact": ["entry.json", "acceptance.json", "crates/meito-core/src/entry.rs", "docs/design.md §2/§5.9/§10.x", "docs/接口冻结.md", "scripts/contract-check.ps1"]
+    },
     {
       "version": "0.3.1",
       "date": "2026-11-08",
@@ -35,7 +41,9 @@
     "udp-probe.json",
     "meito-config.schema.json",
     "tools-lock.schema.json",
-    "link.json"
+    "link.json",
+    "entry.json",
+    "acceptance.json"
   ],
   "byoTurn": {
     "status": "reserved",
