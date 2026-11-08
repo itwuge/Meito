@@ -3,6 +3,9 @@
 //! 唯一依据是 `contracts/state-machine.json`；这里只做声明与查表，实际推进逻辑由
 //! `SessionMachine` 使用同一张表实现，禁止外壳复制第二份。
 
+use crate::error::{ErrorCode, MeitoError};
+use crate::log::is_uuid_v4;
+
 // ===== 状态枚举 =====
 
 /// Model 的唯一会话状态枚举，两个外壳不得各自定义副本。
@@ -214,6 +217,47 @@ impl SessionEvent {
             Self::Checkpoint => "checkpoint",
             Self::OrphanDetect => "orphan_detect",
         }
+    }
+
+    /// 从契约事件名解析事件。
+    ///
+    /// # 参数
+    /// - `value`: 契约中的事件名。
+    ///
+    /// # 错误
+    /// 未知名称返回 `None`；调用方必须显式处理。
+    pub fn parse(value: &str) -> Option<Self> {
+        let event = match value {
+            "start" => Self::Start,
+            "preflight_ok" => Self::PreflightOk,
+            "preflight_failed" => Self::PreflightFailed,
+            "dispatch_ok" => Self::DispatchOk,
+            "dispatch_failed" => Self::DispatchFailed,
+            "queue_timeout" => Self::QueueTimeout,
+            "runner_ready" => Self::RunnerReady,
+            "runner_failed" => Self::RunnerFailed,
+            "p2p_ok" => Self::P2pOk,
+            "p2p_failed" => Self::P2pFailed,
+            "no_direct_path" => Self::NoDirectPath,
+            "link_ready" => Self::LinkReady,
+            "link_failed" => Self::LinkFailed,
+            "join" => Self::Join,
+            "join_timeout" => Self::JoinTimeout,
+            "entry_ready" => Self::EntryReady,
+            "entry_failed" => Self::EntryFailed,
+            "connect_ok" => Self::ConnectOk,
+            "disconnect" => Self::Disconnect,
+            "reconnect_ok" => Self::ReconnectOk,
+            "reconnect_failed" => Self::ReconnectFailed,
+            "stop" => Self::Stop,
+            "force_stop" => Self::ForceStop,
+            "collect_ok" => Self::CollectOk,
+            "collect_failed" => Self::CollectFailed,
+            "checkpoint" => Self::Checkpoint,
+            "orphan_detect" => Self::OrphanDetect,
+            _ => return None,
+        };
+        Some(event)
     }
 }
 
@@ -479,4 +523,142 @@ static AUTO_CANCEL: [AutoCancelRule; 4] = [
 /// 不返回错误。
 pub fn auto_cancel_rules() -> &'static [AutoCancelRule] {
     &AUTO_CANCEL
+}
+
+// ===== 状态机推进 =====
+
+/// 查询某状态在收到某事件时应到达状态。
+///
+/// # 参数
+/// - `from`: 当前状态。
+/// - `event`: 待应用事件。
+///
+/// # 错误
+/// 不返回错误；非法转移返回 `None`，由 `SessionMachine::apply` 转换为错误。
+pub fn transition_for(from: SessionState, event: SessionEvent) -> Option<&'static Transition> {
+    TRANSITIONS
+        .iter()
+        .find(|transition| transition.from == from && transition.event == event)
+}
+
+/// 单个会话的状态机实例；每次推进都必须命中冻结转移表。
+#[derive(Debug, Clone)]
+pub struct SessionMachine {
+    session_id: String,
+    state: SessionState,
+    history: Vec<(SessionEvent, SessionState)>,
+}
+
+impl SessionMachine {
+    /// 创建处于 `idle` 的状态机。
+    ///
+    /// # 参数
+    /// - `session_id`: 会话 id，必须是 UUID v4。
+    ///
+    /// # 错误
+    /// 会话 id 非法返回 `E_USAGE`。
+    pub fn new(session_id: impl Into<String>) -> Result<Self, MeitoError> {
+        let session_id = session_id.into();
+        if !is_uuid_v4(&session_id) {
+            return Err(MeitoError::new(
+                ErrorCode::Usage,
+                format!("会话 id 必须是 UUID v4，收到 {session_id}"),
+            ));
+        }
+        Ok(Self {
+            session_id,
+            state: SessionState::Idle,
+            history: Vec::new(),
+        })
+    }
+
+    /// 返回会话 id。
+    ///
+    /// # 参数
+    /// - 无（仅 `&self`）。
+    ///
+    /// # 错误
+    /// 不返回错误。
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// 返回当前状态。
+    ///
+    /// # 参数
+    /// - 无（仅 `&self`）。
+    ///
+    /// # 错误
+    /// 不返回错误。
+    pub fn state(&self) -> SessionState {
+        self.state
+    }
+
+    /// 返回是否已进入终态。
+    ///
+    /// # 参数
+    /// - 无（仅 `&self`）。
+    ///
+    /// # 错误
+    /// 不返回错误。
+    pub fn is_terminal(&self) -> bool {
+        self.state.is_terminal()
+    }
+
+    /// 判断当前状态是否接受某事件。
+    ///
+    /// # 参数
+    /// - `event`: 待查询事件。
+    ///
+    /// # 错误
+    /// 不返回错误。
+    pub fn can_apply(&self, event: SessionEvent) -> bool {
+        transition_for(self.state, event).is_some()
+    }
+
+    /// 返回已应用事件与到达状态的顺序记录。
+    ///
+    /// # 参数
+    /// - 无（仅 `&self`）。
+    ///
+    /// # 错误
+    /// 不返回错误。
+    pub fn history(&self) -> &[(SessionEvent, SessionState)] {
+        &self.history
+    }
+
+    /// 应用一个事件；非法转移必须报错且状态保持不变。
+    ///
+    /// # 参数
+    /// - `event`: 待应用事件。
+    ///
+    /// # 错误
+    /// 当前状态没有该事件对应的合法转移时返回 `E_INTERNAL`，错误信息列出当前状态允许的事件。
+    pub fn apply(&mut self, event: SessionEvent) -> Result<SessionState, MeitoError> {
+        let transition = transition_for(self.state, event).ok_or_else(|| {
+            let mut legal: Vec<&'static str> = TRANSITIONS
+                .iter()
+                .filter(|candidate| candidate.from == self.state)
+                .map(|candidate| candidate.event.as_str())
+                .collect();
+            legal.sort_unstable();
+            let legal_text = if legal.is_empty() {
+                "无（已到终态）".to_string()
+            } else {
+                legal.join(", ")
+            };
+            MeitoError::new(
+                ErrorCode::Internal,
+                format!(
+                    "非法状态转移：{} + {}；当前状态允许的事件：{}",
+                    self.state.as_str(),
+                    event.as_str(),
+                    legal_text
+                ),
+            )
+        })?;
+        self.state = transition.to;
+        self.history.push((event, self.state));
+        Ok(self.state)
+    }
 }

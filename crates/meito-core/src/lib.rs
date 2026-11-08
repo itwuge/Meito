@@ -37,9 +37,10 @@ pub use log::{
 };
 pub use logs::{read_log_lines, resolve_log_path, LogRecord, SessionLogTail};
 pub use state::{
-    auto_cancel_rules, transitions, AutoCancelRule, SessionEvent, SessionState, Stage, Transition,
-    CHECKPOINT_BEFORE_MAX_MINUTES, IDLE_MINUTES, JOB_HARD_LIMIT_MINUTES, NO_JOIN_MINUTES,
-    RECONNECT_MAX_ICE, RECONNECT_MAX_SSH, SESSION_DEFAULT_MINUTES, SESSION_MAX_MINUTES,
+    auto_cancel_rules, transition_for, transitions, AutoCancelRule, SessionEvent, SessionMachine,
+    SessionState, Stage, Transition, CHECKPOINT_BEFORE_MAX_MINUTES, IDLE_MINUTES,
+    JOB_HARD_LIMIT_MINUTES, NO_JOIN_MINUTES, RECONNECT_MAX_ICE, RECONNECT_MAX_SSH,
+    SESSION_DEFAULT_MINUTES, SESSION_MAX_MINUTES,
 };
 pub use state_store::{SessionSnapshot, StateStore};
 pub use status::{read_status, StatusReport};
