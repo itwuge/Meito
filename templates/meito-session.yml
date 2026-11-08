@@ -107,5 +107,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: meito-artifacts-${{ inputs.session_id }}
-          path: logs/env-session-${{ inputs.session_id }}.json
+          path: |
+            ${{ inputs.artifact_spec }}
+            logs/env-session-${{ inputs.session_id }}.json
           retention-days: 1
