@@ -77,6 +77,7 @@ name = "meito-cli"
 version = "0.2.0"
 dependencies = [
  "meito-core",
+ "serde_json",
  "tracing",
 ]
 
