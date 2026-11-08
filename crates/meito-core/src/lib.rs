@@ -33,8 +33,8 @@ mod workflow;
 pub use acceptance::{load_lightweight_budget, LightweightBudget, ACCEPTANCE_CONTRACT_PATH};
 pub use connection_package::{
     decode_package_wire, encode_package_wire, load_connection_package_contract,
-    open_connection_package, seal_connection_package, ConnectionKeyPair, ConnectionPackageContract,
-    PackageLayout, CONNECTION_PACKAGE_CONTRACT_PATH,
+    open_connection_package, seal_connection_package, AadPolicy, ConnectionKeyPair,
+    ConnectionPackageContract, KdfPolicy, PackageLayout, CONNECTION_PACKAGE_CONTRACT_PATH,
 };
 pub use controller::{ArtifactStore, Command, Controller, EntryAdapter, P2pProvider, SessionView};
 pub use doctor::{run_doctor, CheckStatus, DoctorCheck, DoctorReport, CONTRACT_FILES};

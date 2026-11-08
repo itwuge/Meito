@@ -1,17 +1,30 @@
 //! File: 连接包契约、封装/解封、线格式与跨语言固定向量测试。
 //!
-//! 期望值一律从 `contracts/connection-package.json` 读取；固定向量由 libsodium
-//! （PyNaCl 1.6.2，XChaCha20-Poly1305 IETF + X25519）生成，用于验证 RustCrypto 实现
-//! 的互操作性。X25519 公钥与共享密钥另用 RFC 7748 §6.1 公开向量核对。
+//! 期望值一律从 `contracts/connection-package.json` 读取；固定向量由入库脚本
+//! `scripts/gen-connection-package-vector.py` 生成（PyNaCl 1.6.2：X25519 → HKDF-SHA256 →
+//! XChaCha20-Poly1305 IETF，空 AAD），用于验证 RustCrypto 实现的互操作性。向量可复算：
+//!
+//! ```text
+//! pip install pynacl==1.6.2
+//! python scripts/gen-connection-package-vector.py
+//! ```
+//!
+//! 脚本不含系统随机源，连续两次输出必须逐字节一致。X25519 公钥与共享密钥另用
+//! RFC 7748 §6.1 公开向量核对。
 
 use std::path::PathBuf;
 
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::{XChaCha20Poly1305, XNonce};
+use hkdf::Hkdf;
 use meito_core::{
     decode_package_wire, encode_package_wire, load_connection_package_contract,
     open_connection_package, seal_connection_package, ConnectionKeyPair, ConnectionPackageContract,
     ErrorCode, CONNECTION_PACKAGE_CONTRACT_PATH,
 };
 use serde_json::{json, Value};
+use sha2::Sha256;
+use x25519_dalek::{PublicKey, StaticSecret};
 
 // ===== 测试数据 =====
 
@@ -26,10 +39,12 @@ const RFC7748_ALICE_SECRET: &str =
 const RFC7748_ALICE_PUBLIC: &str =
     "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a";
 
-/// libsodium 生成的固定容器；接收方私钥为 RFC7748_ALICE_SECRET，nonce 为 00..17。
-const LIBSODIUM_VECTOR_WIRE: &str = "TUVJVE8xAQDentt9e33BtNNbYcLs5DU3P4NDyFt4Z02t_H4Ub4grTwABAgMEBQYHCAkKCwwNDg8QERITFBUWF3pZlDU5kQt4frhiCnV8Lj3ZcI5zz4DnpEISMgSP9LbggCTVoyjeJvws1hV_mrkOUX5ZS0RJItX0Z3PjrehX84OJTGDcqYqck0LbADluCEl_WR2o2ghhem2ano_-wYbaUiWB-JNbYfQTD2hlDkA72ilqQ6L9SRUIMMGQZOlHDsJOUUy5v2QV1BlkbW3apzDtNas8_55QMx0xMquBm3uTl2ICmkHm_OA6y1_613hueBAU11ZRRTg7qPq_1DiPRFaaEx_Kdcg2C5UQCOTpbrRQocbvdfb_x0_C6Sd-TRQYsHNhodpmCrGvXZmXoEi10-HuuSx-Tfemw5N-ZIXaK5IjRA5J6jGK13N_w_fQB84f5SpJYez0PYRwJnbz0U_N5H9OB_oT_aE_PjxBl2D5QcXajOrg1lq_6ytK1YO8IC7VIAVeBovejL-hIsYZ";
+/// 入库脚本生成的固定容器（HKDF-SHA256 派生后 XChaCha20-Poly1305，空 AAD）；
+/// 接收方私钥为 RFC7748_ALICE_SECRET，临时私钥为 RFC 7748 §6.1 Bob 私钥，nonce 为 00..17。
+/// 重新生成：`python scripts/gen-connection-package-vector.py`。
+const LIBSODIUM_VECTOR_WIRE: &str = "TUVJVE8xAQDentt9e33BtNNbYcLs5DU3P4NDyFt4Z02t_H4Ub4grTwABAgMEBQYHCAkKCwwNDg8QERITFBUWF9mWNwdQIlvEW4V-cIAuM_nYfWlqBmrfArkWouVKvHIMGEw1bR96pQAYvwfq13u7B66JH85F8ZVgeEk2EnsTtu6QORhuWEkpaY4VU5LnYKtwG_Nf_BCZ1jxt0yWZyOexCIoj9B4B0A64shXehXPW7rZ155STzsq5cJkt8FOzM1U7HX1B-fOkD_xkfVR8d300DPDYvtcsLVzyJlWC4jceFzy8_Ow2lm9HD9ICi5gYT8fyZObildsjKU9LImSTbd8kPKzjDWFbBhlYJXmenzVZmH3bbCchxB6sJ7hiHaQxqzBrDfloGyYUPmhCP6V2U4aJ0Yo7f8ZAZbGWHI4KakzcT1-gqXg3v_sCFUjI8f-5AoXyJpbuEm2wVrYKKIln5qJiAnPSL0IzBLWgsADbX_HRFXiSZdG_RbhPqbJNu7CaQySGH40Y-ZEGfPUq";
 
-/// libsodium 固定向量解密后的明文；键顺序为序列化时的字典序。
+/// 固定向量解密后的明文；键顺序为序列化时的字典序。
 const LIBSODIUM_VECTOR_PLAINTEXT: &str = r#"{"entry":{"graphical":16080,"terminal":17001,"vnc":15900},"expires_at":"2026-11-08T12:00:00Z","host_key_pin":"SHA256:test-pin","p2p":{"host":"127.0.0.1","mode":"frp-xtcp","port":17000},"read_token":"read-token-test","session_id":"11111111-1111-4111-8111-111111111111","version":1,"write_token":"write-token-test"}"#;
 
 // ===== 测试辅助 =====
@@ -99,6 +114,15 @@ fn sealed(contract: &ConnectionPackageContract) -> (ConnectionKeyPair, Vec<u8>) 
     (keypair, container)
 }
 
+/// 用 RFC 7748 Alice 私钥解封仓库固定向量；用于验证派生参数不一致时必须失败。
+fn open_fixed_vector(
+    contract: &ConnectionPackageContract,
+) -> Result<String, meito_core::MeitoError> {
+    let keypair = ConnectionKeyPair::from_secret_bytes(hex32(RFC7748_ALICE_SECRET));
+    let container = decode_package_wire(LIBSODIUM_VECTOR_WIRE).expect("解码固定向量");
+    open_connection_package(contract, &keypair, &container)
+}
+
 /// 断言错误码为 `E_CRYPTO` 且退出码为 6。
 fn assert_crypto(error: meito_core::MeitoError) {
     assert_eq!(error.code(), ErrorCode::Crypto, "错误码");
@@ -148,6 +172,55 @@ fn loader_reads_every_value_from_contract() {
         .map(|item| item.as_str().expect("字段名").to_string())
         .collect();
     assert_eq!(contract.plaintext_fields, expected_fields);
+
+    assert_eq!(
+        contract.kdf.algorithm,
+        value["kdf"]["algorithm"].as_str().expect("kdf.algorithm")
+    );
+    assert_eq!(
+        contract.kdf.hash,
+        value["kdf"]["hash"].as_str().expect("kdf.hash")
+    );
+    assert_eq!(
+        contract.kdf.ikm,
+        value["kdf"]["ikm"].as_str().expect("kdf.ikm")
+    );
+    assert_eq!(
+        contract.kdf.salt,
+        value["kdf"]["salt"].as_str().expect("kdf.salt")
+    );
+    assert_eq!(
+        contract.kdf.salt_policy,
+        value["kdf"]["saltPolicy"].as_str().expect("kdf.saltPolicy")
+    );
+    assert_eq!(
+        contract.kdf.info,
+        value["kdf"]["info"].as_str().expect("kdf.info")
+    );
+    assert_eq!(
+        contract.kdf.output_bytes,
+        value["kdf"]["outputBytes"]
+            .as_u64()
+            .expect("kdf.outputBytes") as usize
+    );
+    assert_eq!(
+        contract.kdf.used_as,
+        value["kdf"]["usedAs"].as_str().expect("kdf.usedAs")
+    );
+    assert!(
+        !contract.kdf.raw_shared_secret_as_key,
+        "共享密钥不得直接当 AEAD 密钥"
+    );
+    assert_eq!(
+        contract.aad.policy,
+        value["aad"]["policy"].as_str().expect("aad.policy"),
+        "AAD 策略必须来自契约"
+    );
+    assert_eq!(
+        contract.aad.aad_bytes,
+        value["aad"]["aadBytes"].as_u64().expect("aad.aadBytes") as usize,
+        "AAD 字节数必须来自契约"
+    );
 
     let expected_header: usize = value["layout"]
         .as_array()
@@ -243,6 +316,119 @@ fn missing_contract_is_rejected() {
     let error = load_connection_package_contract(&root).expect_err("缺少契约必须拒绝");
     assert_config(error);
     std::fs::remove_dir_all(&root).expect("清理临时目录");
+}
+
+// ===== KDF 与 AAD =====
+
+#[test]
+fn kdf_info_mismatch_fails_to_open() {
+    let root = rewritten_contract("kdf-info", |value| {
+        value["kdf"]["info"] = json!("meito-v1/other-purpose");
+    });
+    let contract = load_connection_package_contract(&root).expect("加载改写后的契约");
+    let error = open_fixed_vector(&contract).expect_err("info 不一致必须解封失败");
+    assert_crypto(error);
+    std::fs::remove_dir_all(&root).expect("清理临时目录");
+}
+
+#[test]
+fn kdf_salt_mismatch_fails_to_open() {
+    let root = rewritten_contract("kdf-salt", |value| {
+        value["kdf"]["salt"] = json!("meito-v1");
+    });
+    let contract = load_connection_package_contract(&root).expect("加载改写后的契约");
+    let error = open_fixed_vector(&contract).expect_err("salt 不一致必须解封失败");
+    assert_crypto(error);
+    std::fs::remove_dir_all(&root).expect("清理临时目录");
+}
+
+#[test]
+fn kdf_output_length_mismatch_fails_to_open() {
+    let root = rewritten_contract("kdf-output", |value| {
+        value["kdf"]["outputBytes"] = json!(16);
+    });
+    let contract = load_connection_package_contract(&root).expect("加载改写后的契约");
+    assert_eq!(contract.kdf.output_bytes, 16, "输出长度必须来自契约");
+    let error = open_fixed_vector(&contract).expect_err("输出长度不一致必须解封失败");
+    assert_crypto(error);
+    std::fs::remove_dir_all(&root).expect("清理临时目录");
+}
+
+#[test]
+fn aad_policy_other_than_none_is_rejected() {
+    let root = rewritten_contract("aad-policy", |value| {
+        value["aad"]["policy"] = json!("optional");
+    });
+    let error = load_connection_package_contract(&root).expect_err("非 none 的 AAD 策略必须拒绝");
+    assert_config(error);
+    std::fs::remove_dir_all(&root).expect("清理临时目录");
+}
+
+#[test]
+fn aad_bytes_nonzero_is_rejected() {
+    let root = rewritten_contract("aad-bytes", |value| {
+        value["aad"]["aadBytes"] = json!(8);
+    });
+    let error = load_connection_package_contract(&root).expect_err("none 策略下非零 AAD 必须拒绝");
+    assert_config(error);
+    std::fs::remove_dir_all(&root).expect("清理临时目录");
+}
+
+/// 契约 `aad.policy=none`：固定向量只以空 AAD 通过认证，非空 AAD 必须认证失败。
+#[test]
+fn fixed_vector_authenticates_only_with_empty_aad() {
+    let contract = load_connection_package_contract(&repository_root()).expect("加载连接包契约");
+    assert_eq!(contract.aad.policy, "none", "契约 AAD 策略");
+    assert_eq!(contract.aad.aad_bytes, 0, "契约 AAD 字节数");
+    let container = decode_package_wire(LIBSODIUM_VECTOR_WIRE).expect("解码固定向量");
+
+    let public_key_start = contract.layout.public_key_offset;
+    let public_key_end = public_key_start + contract.layout.public_key_len;
+    let ephemeral_public: [u8; 32] = container
+        .get(public_key_start..public_key_end)
+        .expect("固定向量临时公钥")
+        .try_into()
+        .expect("临时公钥必须为 32 字节");
+    let shared = StaticSecret::from(hex32(RFC7748_ALICE_SECRET))
+        .diffie_hellman(&PublicKey::from(ephemeral_public));
+    let hkdf = Hkdf::<Sha256>::new(Some(contract.kdf.salt.as_bytes()), shared.as_bytes());
+    let mut key = vec![0u8; contract.kdf.output_bytes];
+    hkdf.expand(contract.kdf.info.as_bytes(), &mut key)
+        .expect("按契约派生固定向量密钥");
+    let cipher = XChaCha20Poly1305::new_from_slice(&key).expect("初始化 XChaCha20-Poly1305");
+
+    let nonce_start = contract.layout.nonce_offset;
+    let nonce_end = nonce_start + contract.layout.nonce_len;
+    let nonce = XNonce::from_slice(
+        container
+            .get(nonce_start..nonce_end)
+            .expect("固定向量 nonce"),
+    );
+    let ciphertext = container
+        .get(contract.layout.ciphertext_offset..)
+        .expect("固定向量密文");
+
+    let plaintext = cipher
+        .decrypt(
+            nonce,
+            Payload {
+                msg: ciphertext,
+                aad: &[],
+            },
+        )
+        .expect("空 AAD 必须能解出固定向量");
+    assert_eq!(
+        String::from_utf8(plaintext).expect("明文 UTF-8"),
+        LIBSODIUM_VECTOR_PLAINTEXT
+    );
+    let rejected = cipher.decrypt(
+        nonce,
+        Payload {
+            msg: ciphertext,
+            aad: b"not-none",
+        },
+    );
+    assert!(rejected.is_err(), "非空 AAD 必须认证失败");
 }
 
 // ===== 封装与解封 =====

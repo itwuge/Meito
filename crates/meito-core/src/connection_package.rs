@@ -1,8 +1,11 @@
 //! File: 连接包封装、解封与每作业密钥（contracts/connection-package.json）。
 //!
 //! 线格式、算法、magic、格式版本、布局偏移与单包上限全部从契约读取，代码不另写数值。
-//! 私钥只存在于进程内，随 `StaticSecret` 离开作用域清零，不导出、不记录；派生出的共享
-//! 密钥副本用 `Zeroizing` 包裹。清零是尽力而为，不承诺抵御内存取证。明文只交给调用方，
+//! X25519 共享密钥不直接作为 AEAD 密钥：按契约 `kdf` 段用 HKDF-SHA256 派生，算法、salt、
+//! info 与输出长度都来自契约，代码不写 info 字面量。AEAD 不传 AAD（契约 `aad.policy=none`、
+//! `aadBytes=0`）。私钥只存在于进程内，随 `StaticSecret` 离开作用域清零，不导出、不记录；
+//! 共享密钥副本与派生密钥用 `Zeroizing` 包裹。清零是尽力而为（best-effort）：只覆盖本进程
+//! 持有的缓冲区，不声称可抵御内存取证、交换分区、核心转储或冷启动。明文只交给调用方，
 //! 本模块不解析业务字段。
 
 use std::fs;
@@ -10,9 +13,11 @@ use std::path::Path;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng};
+use chacha20poly1305::aead::{Aead, AeadCore, KeyInit, OsRng, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
+use hkdf::Hkdf;
 use serde_json::{Map, Value};
+use sha2::Sha256;
 use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 use zeroize::Zeroizing;
 
@@ -28,6 +33,9 @@ const X25519_PUBLIC_KEY_BYTES: usize = 32;
 
 /// XChaCha20-Poly1305 nonce 的固定字节数；由算法本身决定，不属于契约数值。
 const XCHACHA_NONCE_BYTES: usize = 24;
+
+/// HKDF-SHA256 单次 expand 能输出的上限（RFC 5869：255 × HashLen）；由算法本身决定。
+const HKDF_SHA256_MAX_OUTPUT_BYTES: usize = 255 * 32;
 
 /// 布局必须按此顺序声明；字段名属于线格式标识，不随契约版本变化。
 const LAYOUT_NAMES: [&str; 6] = [
@@ -64,6 +72,38 @@ pub struct PackageLayout {
     pub header_len: usize,
 }
 
+/// 契约 `kdf` 段；全部取值从契约读取，实现不写 info 字面量。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KdfPolicy {
+    /// 派生算法名；当前只支持 `HKDF-SHA256`。
+    pub algorithm: String,
+    /// 哈希算法名；当前只支持 `sha256`。
+    pub hash: String,
+    /// 输入密钥材料来源；当前只支持 `x25519-shared-secret`。
+    pub ikm: String,
+    /// HKDF salt 字符串；契约固定为空串，实现按契约取值参与派生。
+    pub salt: String,
+    /// salt 语义；当前只支持 `empty-string-fixed`。
+    pub salt_policy: String,
+    /// HKDF info 字符串；实现只读取、不比较字面量，用于绑定协议版本与用途。
+    pub info: String,
+    /// 派生密钥的字节数，来自 `kdf.outputBytes`。
+    pub output_bytes: usize,
+    /// 派生密钥的用途；当前只支持 `xchacha20-poly1305-key`。
+    pub used_as: String,
+    /// 是否允许把 X25519 共享密钥直接作为 AEAD 密钥；必须为 `false`。
+    pub raw_shared_secret_as_key: bool,
+}
+
+/// 契约 `aad` 段；当前固定为「不传 AAD」。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AadPolicy {
+    /// AAD 策略；当前只支持 `none`。
+    pub policy: String,
+    /// AAD 字节数；`policy=none` 时必须为 0。
+    pub aad_bytes: usize,
+}
+
 /// `contracts/connection-package.json` 的强类型视图。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionPackageContract {
@@ -83,8 +123,10 @@ pub struct ConnectionPackageContract {
     pub aead: String,
     /// 实现来源；当前只支持 `rustcrypto`。
     pub implementation: String,
-    /// AAD 策略；当前只支持 `none`。
-    pub aad: String,
+    /// 密钥派生策略。
+    pub kdf: KdfPolicy,
+    /// AAD 策略。
+    pub aad: AadPolicy,
     /// 明文顶层字段名，由上层负责填充与解释。
     pub plaintext_fields: Vec<String>,
     /// 密文字节上限，来自 `serverHandling.maxCiphertextBytes`。
@@ -185,14 +227,20 @@ fn parse_contract(value: &Value, path: &Path) -> Result<ConnectionPackageContrac
         "algorithm.implementation",
         path,
     )?;
-    let aad = require_str(algorithm, "aad", path)?.to_string();
-    require_supported(&aad, "none", "algorithm.aad", path)?;
+    require_supported(
+        require_str(algorithm, "aad", path)?,
+        "none",
+        "algorithm.aad",
+        path,
+    )?;
     validate_algorithm_table(root, algorithm_id_byte, &algorithm_id, path)?;
 
     validate_encoding(root, path)?;
     let max_ciphertext_bytes = parse_server_handling(root, path)?;
     let plaintext_fields = parse_plaintext_fields(root, path)?;
     let layout = parse_layout(root, magic_bytes, path)?;
+    let kdf = parse_kdf(root, path)?;
+    let aad = parse_aad(root, path)?;
 
     Ok(ConnectionPackageContract {
         magic,
@@ -203,6 +251,7 @@ fn parse_contract(value: &Value, path: &Path) -> Result<ConnectionPackageContrac
         key_exchange,
         aead,
         implementation,
+        kdf,
         aad,
         plaintext_fields,
         max_ciphertext_bytes,
@@ -372,6 +421,87 @@ fn parse_plaintext_fields(
         fields.push(name.to_string());
     }
     Ok(fields)
+}
+
+/// 读取并校验密钥派生契约；info 只读取、不比较字面量，便于契约侧改名而无需改代码。
+///
+/// # 参数
+/// - `root`: 契约根对象。
+/// - `path`: 仅用于错误定位。
+///
+/// # 错误
+/// `kdf` 缺失、算法/哈希/输入材料/用途不受支持、saltPolicy 语义不符、
+/// `rawSharedSecretAsKey=true`、info 为空或输出长度非法时返回 `E_CONFIG`。
+fn parse_kdf(root: &Map<String, Value>, path: &Path) -> Result<KdfPolicy, MeitoError> {
+    let kdf = require_object_field(root, "kdf", path)?;
+    let algorithm = require_str(kdf, "algorithm", path)?.to_string();
+    require_supported(&algorithm, "HKDF-SHA256", "kdf.algorithm", path)?;
+    let hash = require_str(kdf, "hash", path)?.to_string();
+    require_supported(&hash, "sha256", "kdf.hash", path)?;
+    let ikm = require_str(kdf, "ikm", path)?.to_string();
+    require_supported(&ikm, "x25519-shared-secret", "kdf.ikm", path)?;
+    let salt = require_str(kdf, "salt", path)?.to_string();
+    let salt_policy = require_str(kdf, "saltPolicy", path)?.to_string();
+    require_supported(&salt_policy, "empty-string-fixed", "kdf.saltPolicy", path)?;
+    let info = require_str(kdf, "info", path)?.to_string();
+    if info.is_empty() {
+        return Err(config_error(path, "kdf.info 不得为空"));
+    }
+    let output_bytes = length_to_usize(
+        require_u64(kdf, "outputBytes", path)?,
+        "kdf.outputBytes",
+        path,
+    )?;
+    if output_bytes > HKDF_SHA256_MAX_OUTPUT_BYTES {
+        return Err(config_error(
+            path,
+            format!(
+                "kdf.outputBytes={output_bytes} 超过 HKDF-SHA256 单次输出上限 {HKDF_SHA256_MAX_OUTPUT_BYTES}"
+            ),
+        ));
+    }
+    let used_as = require_str(kdf, "usedAs", path)?.to_string();
+    require_supported(&used_as, "xchacha20-poly1305-key", "kdf.usedAs", path)?;
+    let raw_shared_secret_as_key = require_bool(kdf, "rawSharedSecretAsKey", path)?;
+    if raw_shared_secret_as_key {
+        return Err(config_error(path, "kdf.rawSharedSecretAsKey 必须为 false"));
+    }
+    Ok(KdfPolicy {
+        algorithm,
+        hash,
+        ikm,
+        salt,
+        salt_policy,
+        info,
+        output_bytes,
+        used_as,
+        raw_shared_secret_as_key,
+    })
+}
+
+/// 读取并校验 AAD 契约；当前只接受「不传 AAD」。
+///
+/// # 参数
+/// - `root`: 契约根对象。
+/// - `path`: 仅用于错误定位。
+///
+/// # 错误
+/// `aad` 缺失、policy 不是 `none` 或 `aadBytes` 非 0 时返回 `E_CONFIG`。
+fn parse_aad(root: &Map<String, Value>, path: &Path) -> Result<AadPolicy, MeitoError> {
+    let aad = require_object_field(root, "aad", path)?;
+    let policy = require_str(aad, "policy", path)?.to_string();
+    require_supported(&policy, "none", "aad.policy", path)?;
+    let aad_bytes = require_u64(aad, "aadBytes", path)?;
+    if aad_bytes != 0 {
+        return Err(config_error(
+            path,
+            format!("aad.policy=none 时 aadBytes 必须为 0，契约声明 {aad_bytes}"),
+        ));
+    }
+    Ok(AadPolicy {
+        policy,
+        aad_bytes: 0,
+    })
 }
 
 /// 按契约 `layout` 顺序累加偏移，并校验与算法固定尺寸一致。
@@ -617,11 +747,17 @@ pub fn seal_connection_package(
     let ephemeral_public = PublicKey::from(&ephemeral);
     let shared = ephemeral.diffie_hellman(&PublicKey::from(*recipient_public));
     let shared_bytes = Zeroizing::new(shared.to_bytes());
-    let cipher = XChaCha20Poly1305::new_from_slice(&*shared_bytes)
+    let derived_key = derive_content_key(contract, &*shared_bytes)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(derived_key.as_slice())
         .map_err(|error| crypto_error(format!("初始化 XChaCha20-Poly1305 失败：{error}")))?;
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    // 契约 aad.policy=none / aadBytes=0：AEAD 不传 AAD，这里显式给空切片。
+    let payload = Payload {
+        msg: plaintext.as_bytes(),
+        aad: &[],
+    };
     let ciphertext = cipher
-        .encrypt(&nonce, plaintext.as_bytes())
+        .encrypt(&nonce, payload)
         .map_err(|error| crypto_error(format!("加密连接包失败：{error}")))?;
     if ciphertext.len() > contract.max_ciphertext_bytes {
         return Err(crypto_error(format!(
@@ -715,10 +851,16 @@ pub fn open_connection_package(
     )?;
     let shared = keypair.secret.diffie_hellman(&PublicKey::from(public_key));
     let shared_bytes = Zeroizing::new(shared.to_bytes());
-    let cipher = XChaCha20Poly1305::new_from_slice(&*shared_bytes)
+    let derived_key = derive_content_key(contract, &*shared_bytes)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(derived_key.as_slice())
         .map_err(|error| crypto_error(format!("初始化 XChaCha20-Poly1305 失败：{error}")))?;
+    // 契约 aad.policy=none / aadBytes=0：AEAD 不传 AAD，这里显式给空切片。
+    let payload = Payload {
+        msg: ciphertext,
+        aad: &[],
+    };
     let plaintext = cipher
-        .decrypt(XNonce::from_slice(&nonce), ciphertext)
+        .decrypt(XNonce::from_slice(&nonce), payload)
         .map_err(|error| crypto_error(format!("AEAD 校验或解密失败：{error}")))?;
     String::from_utf8(plaintext).map_err(|error| crypto_error(format!("明文不是 UTF-8：{error}")))
 }
@@ -750,6 +892,28 @@ pub fn decode_package_wire(wire: &str) -> Result<Vec<u8>, MeitoError> {
 }
 
 // ===== 辅助函数 =====
+
+/// 按契约 `kdf` 段用 HKDF-SHA256 把 X25519 共享密钥派生为 AEAD 密钥。
+///
+/// ECDH 输出不是均匀密钥材料，因此绝不直接当 AEAD 密钥使用。算法、salt、info 与输出长度
+/// 全部来自契约；返回值为 `Zeroizing`，离开作用域时尽力清零（不声称抵御内存取证）。
+///
+/// # 参数
+/// - `contract`: 已加载的连接包契约。
+/// - `shared_secret`: X25519 共享密钥原始字节。
+///
+/// # 错误
+/// 派生长度超出 HKDF 上限或 expand 失败时返回 `E_CRYPTO`（退出码 6）。
+fn derive_content_key(
+    contract: &ConnectionPackageContract,
+    shared_secret: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, MeitoError> {
+    let hkdf = Hkdf::<Sha256>::new(Some(contract.kdf.salt.as_bytes()), shared_secret);
+    let mut derived = Zeroizing::new(vec![0u8; contract.kdf.output_bytes]);
+    hkdf.expand(contract.kdf.info.as_bytes(), derived.as_mut_slice())
+        .map_err(|error| crypto_error(format!("HKDF-SHA256 派生失败：{error}")))?;
+    Ok(derived)
+}
 
 /// 把 `&Value` 转为对象。
 ///
