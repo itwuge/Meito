@@ -21,6 +21,7 @@ mod doctor;
 mod entry;
 mod env;
 mod error;
+mod frpc;
 mod log;
 mod logs;
 mod state;
@@ -41,6 +42,7 @@ pub use doctor::{run_doctor, CheckStatus, DoctorCheck, DoctorReport, CONTRACT_FI
 pub use entry::{load_entry_ports, EntryPorts, ENTRY_CONTRACT_PATH};
 pub use env::{load_ledger, EnvironmentLedger};
 pub use error::{ErrorCode, MeitoError};
+pub use frpc::{audit_visitor_ini, render_visitor_ini, FrpXtcpProvider, FrpcVisitorSpec};
 pub use log::{
     env_ledger_path, is_sensitive_key, is_uuid_v4, is_valid_event_name, redact_json,
     redaction_keys, session_log_path, to_jsonl, FileLogSink, LogEvent, LogLevel, LogSink,
