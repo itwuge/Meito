@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.0",
+  "contractVersion": "0.3.1",
   "purpose": "meito-link 协调服务的服务端语义：通道生命周期、令牌哈希、读取语义、限流、状态码映射与日志禁项",
   "channelId": {
     "opaque": true,
@@ -44,7 +44,38 @@
     "perIpPerMinute": 120,
     "burst": 10
   },
+  "authHeader": {
+    "name": "Authorization",
+    "scheme": "Bearer",
+    "format": "Authorization: Bearer <token>",
+    "appliesTo": [
+      "put",
+      "get",
+      "delete"
+    ]
+  },
+  "operations": {
+    "register": {
+      "method": "POST",
+      "auth": "none",
+      "duplicateLiveChannel": "duplicate_channel"
+    },
+    "put": {
+      "method": "PUT",
+      "auth": "write_token"
+    },
+    "get": {
+      "method": "GET",
+      "auth": "read_token"
+    },
+    "delete": {
+      "method": "DELETE",
+      "auth": "write_token"
+    }
+  },
   "httpStatusMap": {
+    "success": 200,
+    "duplicate_channel": 400,
     "bad_token": 403,
     "unknown_channel": 404,
     "too_large": 413,

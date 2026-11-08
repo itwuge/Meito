@@ -517,9 +517,11 @@ idle
 
 ### 5.7 协调服务 `meito-link`
 
-运行在公网小服务器，只做协调；服务端语义以 `contracts/link.json`（0.3.0）为准：
+运行在公网小服务器，只做协调；服务端语义以 `contracts/link.json`（0.3.1）为准：
 
-- `POST /v1/channels`：CLI 注册通道，必须同时提交 `channel_id`、`read_token_hash`、`write_token_hash`、`public_key` 四个字段；缺 `write_token_hash` 时服务端无从校验 `PUT`。通道 TTL `7200` 秒（2 h）。
+- `POST /v1/channels`：CLI 注册通道，必须同时提交 `channel_id`、`read_token_hash`、`write_token_hash`、`public_key` 四个字段；缺 `write_token_hash` 时服务端无从校验 `PUT`。通道 TTL `7200` 秒。
+- 成功响应统一 `200`：注册、`PUT`、`GET`、`DELETE` 均返回 `200`；同一通道仍存活时重复注册返回 `400`。
+- 鉴权头统一 `Authorization: Bearer <token>`；读 token 只用于 `GET`，写 token 用于 `PUT` 与 `DELETE`。
 - 令牌哈希：`sha256`、`hex` 编码；哈希只用于校验调用方令牌，不写日志。
 - 读写 token 均为**每通道只签发一次**，不是只能读一次；两个哈希在注册时一次提交。
 - `PUT /v1/channels/{id}/blob`：runner 用写 token 提交密文；单包上限不在本节复写，引用 `contracts/connection-package.json` 的 `serverHandling.maxCiphertextBytes`（当前 16384 字节）；服务端只存密文，不解析。
@@ -610,6 +612,7 @@ meito clean --orphans --dry-run
 | 数据面直通 | 终端/图形数据路径不出现逐帧 JSON、行缓冲包装、二次代理 | `ARCH_DATA_PATH` |
 | 日志规范 | 只用 `tracing` JSONL；非 CLI 展示层不出现 `println!`/`print` | `ARCH_LOG_BYPASS` |
 | 注释规范 | Rust 文件首 25 行有 `//!` 头；`pub fn` 有 `///`；关键文件有 `// ===== 组件名 =====` | `ARCH_NOTE` |
+| 数值单一来源 | 文档正文出现的阈值、时长、上限、端口、状态码必须在 `contracts/` 有对应字段；散文不得成为数值的唯一定义处 | `CONTRACT_DOC_NUMERIC` |
 
 架构检查失败即阻断合并；豁免只能写进 `docs/门禁豁免清单.md` 并给出替代验证，不能静默跳过。
 
@@ -1131,6 +1134,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\arch-check.ps1
 | G-10 | 接口冻结 | `docs/接口冻结.md` 存在且版本化；两外壳 stub 编译通过；冻结后改动有变更记录 | R-D-9、本设计 13.7 |
 | G-11 | 一事一提交 | 提交前人工核对；CI 不强制 commit 粒度，但阶段验收检查 commit 数与阶段号 | R-T-9 |
 | G-12 | 版本递增 | `gate.ps1` 的 R-D-9：源码变更未 bump 版本即失败 | R-D-9、R-D-12 |
+| G-13 | 数值单一来源 | `contract-check`：文档正文的阈值/时长/上限/端口/状态码必须在 `contracts/` 有对应字段；当前机器校验覆盖 §5.7/§10.7 与接口冻结的 0.3.x 要点，其余段落按同一规则人工审计 | 本设计 5.9、R-D-13 |
 
 门禁配置（`gate.config.json`）必须体现：`crates/*/src/**/*.rs` 扫描、`//!` 头注释、`// ===== 组件名 =====` 分区、`tracing` 依赖、CLI 展示层 print 白名单。模板原件的 `tools/gate-template/` 保留，活动脚本在 `scripts/`。
 

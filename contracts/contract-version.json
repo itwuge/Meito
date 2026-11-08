@@ -1,10 +1,16 @@
 {
-  "contractVersion": "0.3.0",
+  "contractVersion": "0.3.1",
   "status": "frozen",
   "frozenAt": "2026-11-08",
   "project": "meito",
-  "supersedes": "0.2.0",
+  "supersedes": "0.3.0",
   "revisions": [
+    {
+      "version": "0.3.1",
+      "date": "2026-11-08",
+      "reason": "link.json 未定义成功状态码、重复注册、DELETE 鉴权与鉴权头，实现只能临时约定；补四处并加「文档数值必须回溯到契约」通用规则",
+      "impact": ["link.json", "docs/design.md §5.7/§5.9/§13.8", "docs/接口冻结.md", "scripts/contract-check.ps1"]
+    },
     {
       "version": "0.3.0",
       "date": "2026-11-08",

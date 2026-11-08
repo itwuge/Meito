@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.0",
+  "contractVersion": "0.3.1",
   "initial": "idle",
   "states": [
     { "name": "idle", "terminal": false },

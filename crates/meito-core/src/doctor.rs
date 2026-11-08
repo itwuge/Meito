@@ -15,7 +15,7 @@ use crate::CONTRACT_VERSION;
 
 // ===== 契约文件清单 =====
 
-/// 必须存在的冻结契约文件（0.3.0 共 12 份：版本清单 + 11 份契约/schema）。
+/// 必须存在的冻结契约文件（0.3.1 共 12 份：版本清单 + 11 份契约/schema）。
 pub const CONTRACT_FILES: [&str; 12] = [
     "contracts/contract-version.json",
     "contracts/cli.json",
