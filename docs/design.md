@@ -517,13 +517,17 @@ idle
 
 ### 5.7 协调服务 `meito-link`
 
-运行在公网小服务器，只做协调：
+运行在公网小服务器，只做协调；服务端语义以 `contracts/link.json`（0.3.0）为准：
 
-- `POST /v1/channels`：CLI 注册通道，提交 `channel_id`、读 token 哈希、一次性公钥；TTL 2 h。
-- `PUT /v1/channels/{id}/blob`：runner 用写 token 提交密文（≤16 KB）；服务端只存密文，不解析。
-- `GET /v1/channels/{id}/blob`：CLI 用读 token 拉取；读取后不立即删除，等 `DELETE` 或 TTL。
+- `POST /v1/channels`：CLI 注册通道，必须同时提交 `channel_id`、`read_token_hash`、`write_token_hash`、`public_key` 四个字段；缺 `write_token_hash` 时服务端无从校验 `PUT`。通道 TTL `7200` 秒（2 h）。
+- 令牌哈希：`sha256`、`hex` 编码；哈希只用于校验调用方令牌，不写日志。
+- 读写 token 均为**每通道只签发一次**，不是只能读一次；两个哈希在注册时一次提交。
+- `PUT /v1/channels/{id}/blob`：runner 用写 token 提交密文；单包上限不在本节复写，引用 `contracts/connection-package.json` 的 `serverHandling.maxCiphertextBytes`（当前 16384 字节）；服务端只存密文，不解析。
+- `GET /v1/channels/{id}/blob`：CLI 用读 token 拉取；可重复读取直到 `DELETE` 或 TTL，每通道最多 10 次（`maxReads: 10`），读取后不立即删除。
 - `DELETE /v1/channels/{id}`：会话收尾撤销。
-- 不记录 blob 内容；访问日志只保留时间、状态码、channel_id 哈希；限流与大小上限必须开启。
+- 限流：每通道每分钟 60 次、每 IP 每分钟 120 次，突发 10。
+- HTTP 状态映射：令牌无效 `403`、通道不存在 `404`、包过大 `413`、限流 `429`、方法不允许 `405`、报文非法 `400`、内部错误 `500`。
+- 日志只允许记录 `channel_id`、大小、状态；**禁止记录 blob 片段与任何摘要**（哈希仅用于完整性校验，不落日志）。
 - 该服务不代理任何会话字节；它只是密文的短暂交换点。
 
 ### 5.8 日志与诊断
@@ -931,7 +935,7 @@ websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 &
 | 链接类型 | 能力 | token | 默认 |
 |---|---|---|---|
 | 写链接 | 输入、保存、执行 | 一次性写 token，绑定 session_id + actor | `meito up` 默认生成 |
-| 只读链接 | 只看，不可输入/保存 | 一次性读 token，可单独过期 | `meito share --read-only` |
+| 只读链接 | 只看，不可输入/保存 | 每通道签发一次读 token，可用至 `DELETE`/TTL，最多 10 次读取 | `meito share --read-only` |
 
 - 只读实例优先用不带 `-W` 的 ttyd；若必须复用同一实例，网关层丢弃 stdin/键盘事件。
 - 只读链接不能升级为写；升级必须重新走 `meito share --write` 并校验 actor。

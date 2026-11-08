@@ -51,7 +51,8 @@ $contractFiles = @(
     "connection-package.json",
     "udp-probe.json",
     "meito-config.schema.json",
-    "tools-lock.schema.json"
+    "tools-lock.schema.json",
+    "link.json"
 )
 foreach ($f in $contractFiles) {
     if ($null -ne $version -and -not (@($version.files) -contains $f)) {
@@ -322,6 +323,65 @@ if ($null -ne $lockSchema) {
     }
 }
 
+# ===== 协调服务 link.json（0.3.0 新增） =====
+$link = Load-Json "contracts/link.json"
+if ($null -ne $link) {
+    if ([int]$link.channelTtlSeconds -ne 7200) { Fail "CONTRACT_LINK_TTL" "通道 TTL 必须为 7200 秒" }
+    if ([string]$link.tokenHash.algorithm -ne "sha256" -or [string]$link.tokenHash.encoding -ne "hex" -or $link.tokenHash.logged -ne $false) {
+        Fail "CONTRACT_LINK_HASH" "tokenHash 必须为 sha256/hex 且不落日志"
+    }
+    $registerRequired = @($link.registerPayload.required)
+    foreach ($f in @("channel_id", "read_token_hash", "write_token_hash", "public_key")) {
+        if ($registerRequired -notcontains $f) { Fail "CONTRACT_LINK_REGISTER" "registerPayload 缺少字段：$f" }
+    }
+    if ($registerRequired.Count -ne 4) { Fail "CONTRACT_LINK_REGISTER" "registerPayload 必须同时包含 4 个字段" }
+    $repeatableUntil = @($link.getSemantics.repeatableUntil)
+    foreach ($until in @("delete", "ttl")) {
+        if ($repeatableUntil -notcontains $until) { Fail "CONTRACT_LINK_GET" "getSemantics.repeatableUntil 缺少：$until" }
+    }
+    if ([int]$link.getSemantics.maxReads -ne 10) { Fail "CONTRACT_LINK_GET" "getSemantics.maxReads 必须为 10" }
+    if ([string]$link.tokens.readTokenIssuance -ne "once-per-channel" -or $link.tokens.readTokenOneTime -ne $false) {
+        Fail "CONTRACT_LINK_GET" "读 token 必须每通道只签发一次，且不是只能读一次"
+    }
+    if ([int]$link.rateLimit.perChannelPerMinute -ne 60 -or [int]$link.rateLimit.perIpPerMinute -ne 120 -or [int]$link.rateLimit.burst -ne 10) {
+        Fail "CONTRACT_LINK_RATE" "限流必须为每通道 60/分、每 IP 120/分、突发 10"
+    }
+    $expectedStatus = @{
+        bad_token = 403
+        unknown_channel = 404
+        too_large = 413
+        rate_limited = 429
+        method_not_allowed = 405
+        malformed = 400
+        internal = 500
+    }
+    foreach ($key in $expectedStatus.Keys) {
+        if ([int]$link.httpStatusMap.$key -ne [int]$expectedStatus[$key]) {
+            Fail "CONTRACT_LINK_STATUS" "httpStatusMap.$key 必须为 $($expectedStatus[$key])"
+        }
+    }
+    if ($link.logging.onlyAllowedFields -ne $true) { Fail "CONTRACT_LINK_LOG" "logging.onlyAllowedFields 必须为 true" }
+    foreach ($f in @("channel_id", "size", "status")) {
+        if (@($link.logging.allowedFields) -notcontains $f) { Fail "CONTRACT_LINK_LOG" "logging.allowedFields 缺少：$f" }
+    }
+    foreach ($f in @("blob", "ciphertext", "digest", "hash", "sha256")) {
+        if (@($link.logging.forbiddenContent) -notcontains $f) { Fail "CONTRACT_LINK_LOG" "logging.forbiddenContent 缺少：$f" }
+    }
+    if ($link.logging.blobLogged -ne $false -or $link.logging.hashLogged -ne $false) {
+        Fail "CONTRACT_LINK_LOG" "blob 与摘要均不得落日志"
+    }
+    if ($link.PSObject.Properties.Name -contains "maxCiphertextBytes") {
+        Fail "CONTRACT_LINK_LIMIT" "link.json 不得复写单包上限数值"
+    }
+    $limitRef = [string]$link.packageLimit.maxCiphertextBytesRef
+    if ($limitRef -ne "connection-package.json#serverHandling.maxCiphertextBytes") {
+        Fail "CONTRACT_LINK_LIMIT" "单包上限必须引用 connection-package.json#serverHandling.maxCiphertextBytes"
+    }
+    if ($null -ne $cp -and $null -eq $cp.serverHandling.maxCiphertextBytes) {
+        Fail "CONTRACT_LINK_LIMIT" "引用的 serverHandling.maxCiphertextBytes 不存在"
+    }
+}
+
 # ===== Artifact manifest schema =====
 $schema = Load-Json "contracts/artifact-manifest.schema.json"
 if ($null -ne $schema) {
@@ -381,5 +441,5 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest 一致）" -ForegroundColor Green
+Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义一致）" -ForegroundColor Green
 exit 0
