@@ -22,7 +22,11 @@ mod time;
 
 pub use controller::{ArtifactStore, Command, Controller, EntryAdapter, P2pProvider, SessionView};
 pub use error::{ErrorCode, MeitoError};
-pub use log::{env_ledger_path, is_uuid_v4, session_log_path, LogEvent, LogLevel};
+pub use log::{
+    env_ledger_path, is_sensitive_key, is_uuid_v4, is_valid_event_name, redact_json,
+    redaction_keys, session_log_path, to_jsonl, FileLogSink, LogEvent, LogLevel, LogSink,
+    LOG_DIRECTORY, REDACTED, REDACTION_KEYS,
+};
 pub use state::{
     auto_cancel_rules, transitions, AutoCancelRule, SessionEvent, SessionState, Stage, Transition,
     CHECKPOINT_BEFORE_MAX_MINUTES, IDLE_MINUTES, JOB_HARD_LIMIT_MINUTES, NO_JOIN_MINUTES,
