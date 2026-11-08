@@ -1,6 +1,20 @@
 {
-  "contractVersion": "0.3.2",
-  "purpose": "入口监听端口与回环绑定约束；代码、脚本与文档必须从这里读取，不得另写数值",
+  "contractVersion": "0.3.4",
+  "purpose": "入口监听端口与回环绑定约束；代码、脚本与文档必须从这里读取，不得另写数值。终端入口与回环绑定是 v1 强制项，图形入口为 P2 可选预留",
+  "requiredness": {
+    "bind.address": "required",
+    "bind.loopbackOnly": "required",
+    "bind.allowWildcardBind": "required",
+    "ports.terminal": "required",
+    "terminal.writeFlag": "required",
+    "terminal.singleClientFlag": "required",
+    "terminal.originCheckFlag": "required",
+    "ports.graphical": "reserved",
+    "ports.vnc": "reserved",
+    "graphical.framebuffer": "reserved",
+    "graphical.vncPasswordChars": "reserved",
+    "graphical.vncPasswordDesOnly": "reserved"
+  },
   "bind": {
     "address": "127.0.0.1",
     "loopbackOnly": true,
@@ -19,6 +33,8 @@
     "originCheckFlag": "-O"
   },
   "graphical": {
+    "status": "reserved",
+    "reason": "渲染方案待定；v1 本地版用 SSH X11 转发兜底，网页版候选 KasmVNC 或 xpra，二选一待对比结论",
     "implementation": "Xvfb + x11vnc + websockify + noVNC",
     "framebuffer": {
       "width": 1280,
@@ -27,5 +43,13 @@
     },
     "vncPasswordChars": 8,
     "vncPasswordDesOnly": true
+  },
+  "v1GraphicalFallback": {
+    "status": "required",
+    "transport": "ssh-x11-forwarding",
+    "sshFlag": "-X",
+    "localXServer": true,
+    "webCandidates": ["KasmVNC", "noVNC", "xpra"],
+    "webDecision": "kasmvnc-preferred-novnc-fallback"
   }
 }

@@ -381,6 +381,104 @@ if ($null -ne $acceptance) {
     }
 }
 
+# ===== 图形入口降级（0.3.3）：reserved 不阻塞 v1；转 required 必须进变更记录 =====
+$graphicalKeys = @("ports.graphical", "ports.vnc", "graphical.framebuffer", "graphical.vncPasswordChars", "graphical.vncPasswordDesOnly")
+$mandatoryKeys = @("bind.address", "bind.loopbackOnly", "bind.allowWildcardBind", "ports.terminal", "terminal.writeFlag", "terminal.singleClientFlag", "terminal.originCheckFlag")
+if ($null -ne $entry) {
+    foreach ($key in $mandatoryKeys) {
+        if ([string]$entry.requiredness.$key -ne "required") {
+            Fail "CONTRACT_ENTRY_REQUIREDNESS" "$key 必须为 required（终端入口与回环绑定不可降级）"
+        }
+    }
+    $promoted = $false
+    foreach ($key in $graphicalKeys) {
+        $state = [string]$entry.requiredness.$key
+        if ($state -eq "required") {
+            $promoted = $true
+        } elseif ($state -ne "reserved" -and $state -ne "optional") {
+            Fail "CONTRACT_ENTRY_REQUIREDNESS" "$key 必须为 reserved/optional，当前为 $state"
+        }
+    }
+    if (-not $promoted) {
+        if ([string]$entry.graphical.status -ne "reserved") {
+            Fail "CONTRACT_ENTRY_GRAPHICAL" "graphical.status 必须为 reserved"
+        }
+        if ([string]$entry.graphical.reason -notmatch "渲染方案待定") {
+            Fail "CONTRACT_ENTRY_GRAPHICAL" "graphical.reason 必须说明渲染方案待定"
+        }
+    }
+    if ([string]$entry.v1GraphicalFallback.status -ne "required" -or [string]$entry.v1GraphicalFallback.sshFlag -ne "-X") {
+        Fail "CONTRACT_ENTRY_GRAPHICAL" "v1GraphicalFallback 必须为 required 且 sshFlag=-X"
+    }
+    if ((@($entry.v1GraphicalFallback.webCandidates) -join ",") -notmatch "KasmVNC" -or (@($entry.v1GraphicalFallback.webCandidates) -join ",") -notmatch "noVNC") {
+        Fail "CONTRACT_ENTRY_GRAPHICAL" "webCandidates 必须包含 KasmVNC 与 noVNC 兜底"
+    }
+    $changeLog = Get-Content -LiteralPath "docs/变更记录.md" -Raw -Encoding UTF8
+    if ($promoted -and -not [regex]::IsMatch($changeLog, "(?m)^#{2,3}\s+.*图形入口转正")) {
+        Fail "CONTRACT_ENTRY_PROMOTION" "图形字段改为 required 时必须在变更记录新增标题含「图形入口转正」的条目"
+    }
+}
+if ($null -ne $acceptance) {
+    $acceptancePromoted = $false
+    foreach ($metric in @($acceptance.graphical.optionalMetrics)) {
+        $metricState = [string]$acceptance.requiredness.$metric
+        if ($metricState -eq "required") {
+            $acceptancePromoted = $true
+        } elseif ($metricState -ne "optional") {
+            Fail "CONTRACT_ACCEPTANCE_GRAPHICAL" "$metric 必须为 optional，当前为 $metricState"
+        }
+    }
+    if (-not $acceptancePromoted -and [string]$acceptance.graphical.status -ne "reserved") {
+        Fail "CONTRACT_ACCEPTANCE_GRAPHICAL" "acceptance.graphical.status 必须为 reserved"
+    }
+    if ($acceptancePromoted) {
+        $changeLog = Get-Content -LiteralPath "docs/变更记录.md" -Raw -Encoding UTF8
+        if (-not [regex]::IsMatch($changeLog, "(?m)^#{2,3}\s+.*图形入口转正")) {
+            Fail "CONTRACT_ENTRY_PROMOTION" "图形指标改为 required 时必须在变更记录新增标题含「图形入口转正」的条目"
+        }
+    }
+    if ($acceptance.metrics.sc07VncPasswordOnlyMustFail -ne $true) {
+        Fail "CONTRACT_ACCEPTANCE_GRAPHICAL" "sc07VncPasswordOnlyMustFail 必须保留为 true（图形鉴权预留）"
+    }
+}
+
+# ===== 轻量性预算（0.3.4）：已定项与 pending-calibration 项 =====
+$lightweight = $acceptance.lightweight
+if ($null -eq $lightweight) {
+    Fail "CONTRACT_LIGHTWEIGHT" "acceptance.json 缺少 lightweight 预算"
+} else {
+    if ([string]$lightweight.status -ne "required") {
+        Fail "CONTRACT_LIGHTWEIGHT" "lightweight.status 必须为 required"
+    }
+    $fixedBudgets = @{
+        runnerResidentProcessCountMax = 4
+        runnerNewPackageCountMax = 3
+        graphicalComponentCountMax = 0
+    }
+    foreach ($key in $fixedBudgets.Keys) {
+        if ([int]$lightweight.metrics.$key -ne [int]$fixedBudgets[$key]) {
+            Fail "CONTRACT_LIGHTWEIGHT" "lightweight.metrics.$key 必须为 $($fixedBudgets[$key])"
+        }
+    }
+    $pendingBudgets = @("releaseBinaryBytesMax", "localIdleResidentBytesMax", "runnerPreflightResidentBytesMax", "linkIdleResidentBytesMax", "cliColdStartOfflineMillisMax", "directDependencyCountMax")
+    foreach ($key in $pendingBudgets) {
+        if ([string]$lightweight.metrics.$key -ne "pending-calibration") {
+            Fail "CONTRACT_LIGHTWEIGHT" "lightweight.metrics.$key 必须为 pending-calibration"
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$lightweight.pendingCalibration.$key.neededMeasurement)) {
+            Fail "CONTRACT_LIGHTWEIGHT" "lightweight.pendingCalibration.$key 缺少 neededMeasurement"
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$lightweight.pendingCalibration.$key.calibratedBy)) {
+            Fail "CONTRACT_LIGHTWEIGHT" "lightweight.pendingCalibration.$key 缺少 calibratedBy"
+        }
+    }
+    foreach ($key in (@($fixedBudgets.Keys) + $pendingBudgets)) {
+        if ([string]::IsNullOrWhiteSpace([string]$lightweight.methods.$key)) {
+            Fail "CONTRACT_LIGHTWEIGHT" "lightweight.methods.$key 缺少测法（不可执行）"
+        }
+    }
+}
+
 # 入口端口只能来自契约；加载器不得硬编码
 $entrySrc = "crates/meito-core/src/entry.rs"
 if (-not (Test-Path -LiteralPath $entrySrc)) {
@@ -592,7 +690,9 @@ $docSections = @(
     @{ File = "docs/design.md"; Start = "^###\s+10\.7\s"; End = "^##\s+11\." },
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.2\s"; End = "^##\s+5\.3\s" },
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.3\s"; End = "^##\s+5\.4\s" },
-    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.4\s"; End = "^##\s+6\." }
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.4\s"; End = "^##\s+5\.5\s" },
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.5\s"; End = "^##\s+5\.6\s" },
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.6\s"; End = "^##\s+6\." }
 )
 foreach ($section in $docSections) {
     $body = Get-DocSection $section.File $section.Start $section.End
@@ -667,5 +767,5 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义/entry 端口/acceptance 指标一致；文档数值可回溯契约，人工审计项已显式标注）" -ForegroundColor Green
+Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义/entry 端口/acceptance 指标与轻量预算一致；图形入口字段为 reserved/optional，不阻塞 v1；文档数值可回溯契约，人工审计项已显式标注）" -ForegroundColor Green
 exit 0

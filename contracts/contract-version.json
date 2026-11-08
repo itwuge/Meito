@@ -1,10 +1,22 @@
 {
-  "contractVersion": "0.3.2",
+  "contractVersion": "0.3.4",
   "status": "frozen",
   "frozenAt": "2026-11-08",
   "project": "meito",
-  "supersedes": "0.3.1",
+  "supersedes": "0.3.3",
   "revisions": [
+    {
+      "version": "0.3.4",
+      "date": "2026-11-08",
+      "reason": "用户要求主要保证轻量级；把二进制体积、常驻内存、离线冷启动、直接依赖数、runner 常驻进程/新增安装包、v1 图形组件数量写成可执行验收预算",
+      "impact": ["acceptance.json", "docs/design.md §2/§10.9/§13.8", "docs/接口冻结.md §5.6", "scripts/contract-check.ps1"]
+    },
+    {
+      "version": "0.3.3",
+      "date": "2026-11-08",
+      "reason": "图形入口 noVNC 三层栈降级为 P2 可选预留；v1 本地兜底改为 SSH X11 转发，网页版候选 KasmVNC 或 xpra；预留字段保留但不得阻塞 v1 验收",
+      "impact": ["entry.json", "acceptance.json", "docs/design.md §2/§5.9/§10.4/§10.8", "docs/接口冻结.md §5.5", "scripts/contract-check.ps1"]
+    },
     {
       "version": "0.3.2",
       "date": "2026-11-08",

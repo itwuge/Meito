@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.2",
+  "contractVersion": "0.3.4",
   "purpose": "runner 出站 UDP 可达性探测；只探测不承载会话字节",
   "target": {
     "source": "meito.toml",
