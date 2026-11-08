@@ -15,8 +15,8 @@ use crate::CONTRACT_VERSION;
 
 // ===== 契约文件清单 =====
 
-/// 必须存在的冻结契约文件（0.3.1 共 12 份：版本清单 + 11 份契约/schema）。
-pub const CONTRACT_FILES: [&str; 12] = [
+/// 必须存在的冻结契约文件（0.3.2 共 14 份：版本清单 + 13 份契约/schema）。
+pub const CONTRACT_FILES: [&str; 14] = [
     "contracts/contract-version.json",
     "contracts/cli.json",
     "contracts/error-codes.json",
@@ -29,6 +29,8 @@ pub const CONTRACT_FILES: [&str; 12] = [
     "contracts/meito-config.schema.json",
     "contracts/tools-lock.schema.json",
     "contracts/link.json",
+    "contracts/entry.json",
+    "contracts/acceptance.json",
 ];
 
 /// 深度检查时抽取 workflow 输入名的来源文件。

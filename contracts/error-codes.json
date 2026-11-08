@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.1",
+  "contractVersion": "0.3.2",
   "exitCodes": [
     { "code": 0, "meaning": "success" },
     { "code": 1, "meaning": "internal error" },

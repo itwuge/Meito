@@ -52,7 +52,9 @@ $contractFiles = @(
     "udp-probe.json",
     "meito-config.schema.json",
     "tools-lock.schema.json",
-    "link.json"
+    "link.json",
+    "entry.json",
+    "acceptance.json"
 )
 foreach ($f in $contractFiles) {
     if ($null -ne $version -and -not (@($version.files) -contains $f)) {
@@ -323,6 +325,78 @@ if ($null -ne $lockSchema) {
     }
 }
 
+# ===== 入口端口契约 entry.json（0.3.2） =====
+$entry = Load-Json "contracts/entry.json"
+if ($null -ne $entry) {
+    if ([string]$entry.bind.address -ne "127.0.0.1") {
+        Fail "CONTRACT_ENTRY_BIND" "bind.address 必须为 127.0.0.1"
+    }
+    if ($entry.bind.loopbackOnly -ne $true -or $entry.bind.allowWildcardBind -ne $false) {
+        Fail "CONTRACT_ENTRY_BIND" "bind 必须 loopbackOnly=true 且 allowWildcardBind=false"
+    }
+    $expectedPorts = @{
+        terminal = 7681
+        graphical = 6080
+        vnc = 5900
+    }
+    foreach ($key in $expectedPorts.Keys) {
+        if ([int]$entry.ports.$key -ne [int]$expectedPorts[$key]) {
+            Fail "CONTRACT_ENTRY_PORT" "ports.$key 必须为 $($expectedPorts[$key])"
+        }
+    }
+    if ([int]$entry.graphical.framebuffer.width -ne 1280 -or [int]$entry.graphical.framebuffer.height -ne 800 -or [int]$entry.graphical.framebuffer.depth -ne 24) {
+        Fail "CONTRACT_ENTRY_FB" "图形帧缓冲必须为 1280x800x24"
+    }
+    if ([int]$entry.graphical.vncPasswordChars -ne 8) {
+        Fail "CONTRACT_ENTRY_VNC" "vncPasswordChars 必须为 8"
+    }
+    if ([string]$entry.terminal.writeFlag -ne "-W" -or [string]$entry.terminal.singleClientFlag -ne "-m 1" -or [string]$entry.terminal.originCheckFlag -ne "-O") {
+        Fail "CONTRACT_ENTRY_TTYD" "ttyd 标志必须为 -W / -m 1 / -O"
+    }
+}
+
+# ===== 验收指标契约 acceptance.json（0.3.2） =====
+$acceptance = Load-Json "contracts/acceptance.json"
+if ($null -ne $acceptance) {
+    $expectedMetrics = @{
+        sc01ColdStartP95Seconds = 180
+        sc01Samples = 10
+        sc04AuthFailureSeconds = 10
+        sc05TransferSizeMegabytes = 100
+        sc05TransferRepeats = 3
+        sc05ServerOverheadPercentMax = 5
+        sc08MaxOverrunSeconds = 60
+        sc08IdleStopGraceMinutes = 5
+        sc08DownStopGraceSeconds = 60
+        sc13DefconfigRuns = 2
+        sc15FirstRunMinutes = 15
+    }
+    foreach ($key in $expectedMetrics.Keys) {
+        if ([int]$acceptance.metrics.$key -ne [int]$expectedMetrics[$key]) {
+            Fail "CONTRACT_ACCEPTANCE" "metrics.$key 必须为 $($expectedMetrics[$key])"
+        }
+    }
+    if ((@($acceptance.metrics.sc07UnauthorizedStatuses) -join ",") -ne "401,403") {
+        Fail "CONTRACT_ACCEPTANCE" "sc07UnauthorizedStatuses 必须为 401,403"
+    }
+}
+
+# 入口端口只能来自契约；加载器不得硬编码
+$entrySrc = "crates/meito-core/src/entry.rs"
+if (-not (Test-Path -LiteralPath $entrySrc)) {
+    Fail "CONTRACT_ENTRY_CODE" "缺少入口契约加载器 crates/meito-core/src/entry.rs"
+} else {
+    $entryText = Get-Content -LiteralPath $entrySrc -Raw -Encoding UTF8
+    if ($entryText -notmatch [regex]::Escape("contracts/entry.json")) {
+        Fail "CONTRACT_ENTRY_CODE" "entry.rs 未引用 contracts/entry.json"
+    }
+    foreach ($raw in @("7681", "6080", "5900")) {
+        if ($entryText -match $raw) {
+            Fail "CONTRACT_ENTRY_CODE" "entry.rs 不得硬编码端口 $raw"
+        }
+    }
+}
+
 # ===== 协调服务 link.json（0.3.x） =====
 $link = Load-Json "contracts/link.json"
 if ($null -ne $link) {
@@ -505,10 +579,20 @@ foreach ($contractFile in (Get-ChildItem -Path "contracts" -File -Filter *.json)
 }
 
 $docSections = @(
+    @{ File = "docs/design.md"; Start = "^##\s+2\.\s+成功判据"; End = "^##\s+3\.\s+用户使用流程" },
+    @{ File = "docs/design.md"; Start = "^###\s+3\.2\s"; End = "^###\s+3\.2\.1\s" },
+    @{ File = "docs/design.md"; Start = "^###\s+5\.6\s"; End = "^###\s+5\.7\s" },
     @{ File = "docs/design.md"; Start = "^###\s+5\.7\s"; End = "^###\s+5\.8\s" },
+    @{ File = "docs/design.md"; Start = "^###\s+5\.10\s"; End = "^##\s+6\." },
+    @{ File = "docs/design.md"; Start = "^###\s+8\.3\s"; End = "^###\s+8\.4\s" },
+    @{ File = "docs/design.md"; Start = "^###\s+9\.4\s"; End = "^###\s+9\.5\s" },
+    @{ File = "docs/design.md"; Start = "^###\s+10\.2\s"; End = "^依赖安装耗时" },
+    @{ File = "docs/design.md"; Start = "^###\s+10\.3\s"; End = "^###\s+10\.4\s" },
+    @{ File = "docs/design.md"; Start = "^###\s+10\.4\s"; End = "^###\s+10\.5\s" },
     @{ File = "docs/design.md"; Start = "^###\s+10\.7\s"; End = "^##\s+11\." },
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.2\s"; End = "^##\s+5\.3\s" },
-    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.3\s"; End = "^##\s+6\." }
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.3\s"; End = "^##\s+5\.4\s" },
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.4\s"; End = "^##\s+6\." }
 )
 foreach ($section in $docSections) {
     $body = Get-DocSection $section.File $section.Start $section.End
@@ -516,12 +600,15 @@ foreach ($section in $docSections) {
         Fail "CONTRACT_DOC_NUMERIC" "无法定位文档段落：$($section.File) $($section.Start)"
         continue
     }
-    foreach ($m in [regex]::Matches($body, '(\d+)`?\s*(秒|分钟|小时|次|字节|端口)')) {
+    foreach ($m in [regex]::Matches($body, '(\d+)`?\s*(ms|min|m|s|秒|分钟|小时|次|字节|端口|位|MB|KB|%)')) {
         $raw = [int]$m.Groups[1].Value
         $seconds = $null
         switch ($m.Groups[2].Value) {
             "秒" { $seconds = $raw }
+            "s" { $seconds = $raw }
             "分钟" { $seconds = $raw * 60 }
+            "min" { $seconds = $raw * 60 }
+            "m" { $seconds = $raw * 60 }
             "小时" { $seconds = $raw * 3600 }
         }
         if ($null -ne $seconds) {
@@ -532,11 +619,38 @@ foreach ($section in $docSections) {
             Fail "CONTRACT_DOC_NUMERIC" "$($section.File) 的 $($m.Value) 在 contracts 中无对应字段"
         }
     }
-    foreach ($m in [regex]::Matches($body, '`(4\d\d|5\d\d)`')) {
+    foreach ($m in [regex]::Matches($body, '(?<![0-9A-Za-z])(\d{4,5})(?![0-9A-Za-z])')) {
+        $port = $m.Groups[1].Value
+        if (-not $contractNumbers.ContainsKey($port)) {
+            Fail "CONTRACT_DOC_NUMERIC" "$($section.File) 的四位以上数值 $port 在 contracts 中无对应字段"
+        }
+    }
+    foreach ($m in [regex]::Matches($body, '(\d+)x(\d+)x(\d+)')) {
+        foreach ($group in @(1, 2, 3)) {
+            $value = $m.Groups[$group].Value
+            if (-not $contractNumbers.ContainsKey($value)) {
+                Fail "CONTRACT_DOC_NUMERIC" "$($section.File) 的分辨率段 $value 在 contracts 中无对应字段"
+            }
+        }
+    }
+    foreach ($m in [regex]::Matches($body, '(?<!\d)(4\d\d|5\d\d)(?!\d)')) {
         $code = $m.Groups[1].Value
         if (-not $contractNumbers.ContainsKey($code)) {
             Fail "CONTRACT_DOC_NUMERIC" "$($section.File) 的状态码 $code 在 contracts 中无对应字段"
         }
+    }
+}
+
+# 人工审计项必须在文档显式标注，且不得混入机器覆盖段落
+$designText = Get-Content -LiteralPath "docs/design.md" -Raw -Encoding UTF8
+foreach ($pattern in @("(?m)^###\s+10\.5\s.*人工审计", "(?m)^###\s+10\.6\s.*人工审计", "(?m)^依赖安装耗时（\*\*人工审计\*\*")) {
+    if (-not [regex]::IsMatch($designText, $pattern)) {
+        Fail "CONTRACT_DOC_AUDIT" "design.md 缺少人工审计标注：$pattern"
+    }
+}
+foreach ($needle in @("机器覆盖段落", "人工审计项")) {
+    if ($designText -notmatch [regex]::Escape($needle)) {
+        Fail "CONTRACT_DOC_AUDIT" "design §5.9 缺少覆盖/审计清单：$needle"
     }
 }
 
@@ -553,5 +667,5 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义一致；文档数值可回溯契约）" -ForegroundColor Green
+Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义/entry 端口/acceptance 指标一致；文档数值可回溯契约，人工审计项已显式标注）" -ForegroundColor Green
 exit 0

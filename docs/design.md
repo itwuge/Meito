@@ -84,7 +84,7 @@ Meito 要在 GitHub 托管 runner 上获得一个可交互会话，用于 `make 
 
 ## 2. 成功判据
 
-以下判据在实现阶段逐条执行；**当前全部为设计判据，除注明“本次已验证”的条目外均未实测**。
+以下判据在实现阶段逐条执行；**当前全部为设计判据，除注明“本次已验证”的条目外均未实测**。本节出现的延迟、采样次数、传输量、时长、端口与状态码以 `contracts/acceptance.json`、`contracts/entry.json`、`contracts/state-machine.json` 为唯一来源，本文只做索引，不重复定义。
 
 | ID | 判据 | 判定方式 | 当前状态 |
 |---|---|---|---|
@@ -99,7 +99,7 @@ Meito 要在 GitHub 托管 runner 上获得一个可交互会话，用于 `make 
 | SC-09 | 无孤儿会话 | 收尾后 `gh run list` 中无该 workflow 的 active/queued 运行；`meito clean --orphans` 可清理人为制造的孤儿 | 未验证 |
 | SC-10 | 日志链路完整 | 每次会话本地与 runner 都有同一 `session_id` 的日志；失败含错误码、阶段、证据路径 | 未验证 |
 | SC-11 | 日志不泄露连接串/令牌/私钥 | 对本地与 runner 日志做正则扫描，命中数为 0；artifact 中不含连接串 | 未验证 |
-| SC-12 | 6 小时硬上限前主动收尾 | `max_minutes` 默认 60、硬上限 300；watchdog 在 300 前结束并上传 checkpoint；不依赖 360 的强制 fail | 未验证 |
+| SC-12 | job 硬上限前主动收尾 | `max_minutes` 默认 60 min、硬上限 300 min；watchdog 在 300 min 前结束并上传 checkpoint；不依赖 360 min 的强制 fail | 未验证 |
 | SC-13 | 非交互 defconfig 路线可复现 | 同一输入文件连续 2 次生成 `defconfig`，SHA256 相同；与 menuconfig 样本对比差异可解释 | 未验证 |
 | SC-14 | 门禁与仓库初始化可用 | `scripts/gate.ps1 -SelfTest` 退出码 0；全量门禁退出码 0；`docs/分支归属.md` 六行已填 | 本次已验证：SelfTest PASS、全量 0 violations、首个提交 `7bb9335`（见变更记录） |
 | SC-15 | 新用户按 README 快速开始可完成 | 另一台干净机器按 README 操作，15 min 内到达入口；记录实际失败点 | 未验证 |
@@ -151,6 +151,8 @@ Meito 要在 GitHub 托管 runner 上获得一个可交互会话，用于 `make 
 | 9 | 用户 | 在 ttyd 里执行 `make menuconfig`，保存 `.config`；可切到图形入口 | `E_ENTRY` / 用户操作 |
 | 10 | 本地 | `meito pull --apply`：下载 artifact，校验 manifest 与 SHA256，三方应用 diff；冲突进 `.meito/conflicts/<sid>/` | `E_ARTIFACT` / `E_APPLY_CONFLICT` |
 | 11 | 本地 | `meito down`：通知 runner 收尾、等待 artifact 上传、撤销通道、删除本地临时密钥、打印日志路径 | `E_CANCEL`，可 `--force` 后 `gh run cancel` |
+
+端口与回环绑定以 `contracts/entry.json` 为准；时长与采样以 `contracts/acceptance.json`、`contracts/state-machine.json` 为准，本表只做索引。
 
 ### 3.2.1 从打开网页到 shell（网页版）
 
@@ -507,8 +509,8 @@ idle
 远端脚本保持“薄壳”，业务逻辑在 Rust 二进制里：
 
 - `scripts/remote/bootstrap.sh`：`set -euo pipefail`，下载并校验锁定版本的 `meito-runner`、`frpc`、`ttyd`；所有下载带 SHA256；失败保留 `logs/session-<id>.jsonl`。
-- `scripts/remote/start-terminal.sh`：调用 `meito-runner entry terminal`，启动 ttyd，绑定 `127.0.0.1:7681`。
-- `scripts/remote/start-graphical.sh`：调用 `meito-runner entry graphical`，启动 Xvfb/WM/x11vnc/websockify，全部绑定回环。
+- `scripts/remote/start-terminal.sh`：调用 `meito-runner entry terminal`，启动 ttyd，绑定 `127.0.0.1:7681`（端口与回环地址取自 `contracts/entry.json`，不得硬编码）。
+- `scripts/remote/start-graphical.sh`：调用 `meito-runner entry graphical`，启动 Xvfb/WM/x11vnc/websockify，全部绑定回环（端口与帧缓冲取自 `contracts/entry.json`）。
 - `scripts/remote/watchdog.sh`：调用 `meito-runner watchdog`，处理空闲/最长时限/停止文件/checkpoint；不再使用 Python。
 - `scripts/remote/collect.sh`：调用 `meito-runner collect`，生成 manifest、diff、untracked 包、日志，并调用 artifact_guard。
 - `scripts/remote/check-actor.sh`：调用 `meito-runner check-actor`；actor 白名单是硬门禁。
@@ -517,7 +519,7 @@ idle
 
 ### 5.7 协调服务 `meito-link`
 
-运行在公网小服务器，只做协调；服务端语义以 `contracts/link.json`（0.3.1）为准：
+运行在公网小服务器，只做协调；服务端语义以 `contracts/link.json`（0.3.2）为准：
 
 - `POST /v1/channels`：CLI 注册通道，必须同时提交 `channel_id`、`read_token_hash`、`write_token_hash`、`public_key` 四个字段；缺 `write_token_hash` 时服务端无从校验 `PUT`。通道 TTL `7200` 秒。
 - 成功响应统一 `200`：注册、`PUT`、`GET`、`DELETE` 均返回 `200`；同一通道仍存活时重复注册返回 `400`。
@@ -614,6 +616,10 @@ meito clean --orphans --dry-run
 | 注释规范 | Rust 文件首 25 行有 `//!` 头；`pub fn` 有 `///`；关键文件有 `// ===== 组件名 =====` | `ARCH_NOTE` |
 | 数值单一来源 | 文档正文出现的阈值、时长、上限、端口、状态码必须在 `contracts/` 有对应字段；散文不得成为数值的唯一定义处 | `CONTRACT_DOC_NUMERIC` |
 
+**机器覆盖段落（`CONTRACT_DOC_NUMERIC` 实际校验）**：design §2、§3.2、§5.6、§5.7、§5.10、§8.3、§9.4、§10.2（启停顺序部分）、§10.3、§10.4、§10.7，以及 `docs/接口冻结.md` §5.2–§5.4。抽取规则为：带单位数值（秒/分钟/小时/次/字节/端口/s/min/m/ms/MB/KB/%/位，分钟与小时按秒换算后仍允许原值）、4–5 位端口、`宽x高x深` 分辨率与 `4xx/5xx` 状态码；命中后必须能在 `contracts/*.json` 的数值集合中找到。
+
+**人工审计项（未纳入机器覆盖，文档已显式标注“人工审计”）**：§10.2 的依赖安装耗时估算表、§10.5 带宽与 CPU 估算、§10.6 job 硬上限下的取舍，以及 §4/§7/§11/§12/§14 中的工程估算与对比数据。这些数值不是验收阈值或契约字段，改由评审人对照契约为准；若后续成为验收依据，必须先落 `contracts/` 再移入机器覆盖。
+
 架构检查失败即阻断合并；豁免只能写进 `docs/门禁豁免清单.md` 并给出替代验证，不能静默跳过。
 
 ### 5.10 网页版外壳的边界
@@ -622,7 +628,7 @@ meito clean --orphans --dry-run
 - `crates/meito-web` 只做：静态文件服务、OAuth 回调、WebSocket 信令、WebRTC DataChannel 适配、把控制事件转成 `meito-core` 调用。
 - 终端/图形字节从 DataChannel 直接进 xterm.js/noVNC，不经过服务端 WebSocket；服务端只转发 SDP/ICE/控制消息。
 - 网页版的“本地版回退”只显示命令与链接，不在浏览器里模拟 `meito pull --apply`；落到本地仓库必须由本地版完成。
-- 网页版不得直接暴露 6080/7681；所有入口只在 runner 回环，DataChannel 是唯一入口。
+- 网页版不得直接暴露 6080/7681（端口取自 `contracts/entry.json`）；所有入口只在 runner 回环，DataChannel 是唯一入口。
 
 ---
 
@@ -755,6 +761,7 @@ meito clean --orphans --dry-run
   - 禁止 `-listen 0.0.0.0`、禁止把 6080 直接暴露公网、禁止任何隧道中继。
 - 本地 token 网关：只绑 `127.0.0.1`；校验 token 后转发 HTTP/WebSocket；不记录 token；错误返回 401/403；会话结束关闭并清空。
 - 验收：runner 上 `ss -ltnp` 只允许 7681/5900/6080 出现在 `127.0.0.1`；任何 `0.0.0.0` 直接失败。
+- 本节端口 7681/5900/6080、绑定地址 `127.0.0.1`、帧缓冲 1280x800x24、VNC 密码 8 位，以及 ttyd 的 `-W`/`-m 1`/`-O` 全部取自 `contracts/entry.json`；代码与脚本不得另写数值。
 
 ### 8.4 GitHub 脱敏与交互 shell 的特别纪律
 
@@ -815,6 +822,8 @@ frp xtcp 打洞
    - 判据：服务器对应端口/接口的字节增量 < 5% × 100 MB，且抓包中不出现持续的大包数据流；控制流量只应是心跳/协调量级。
    - 同时记录本地发送量、runner 接收量，三者对照。
 3. **服务器抓包**：在服务器协调接口上 `tcpdump` 过滤 peer 地址与端口；传输期间只应看到控制/协调包；若出现与 payload 成比例的数据包，判定失败。
+
+本节传输量、重复次数、负载阈值与空闲基线取自 `contracts/acceptance.json`；验收脚本必须读取同一字段，不得另写一套数值。
 
 Tailscale 额外证据：
 
@@ -879,7 +888,9 @@ EntryAdapter
 8. 会话结束 → 停止入口 → 收集 artifact → 停止 sshd/frpc → 撤销通道
 ```
 
-依赖安装耗时（**未实测**，仅作工程估算，不作为验收依据）：
+本节端口与回环地址取自 `contracts/entry.json`，不另写数值。
+
+依赖安装耗时（**人工审计**：未实测，仅作工程估算，不作为验收依据，不纳入 `CONTRACT_DOC_NUMERIC` 机器覆盖）：
 
 | 入口 | 依赖 | 估算 | 说明 |
 |---|---|---|---|
@@ -898,8 +909,9 @@ ttyd -W -i 127.0.0.1 -p 7681 -m 1 -O -T xterm-256color \
 
 - `-W` 必须：默认只读，无法操作 menuconfig。
 - 只绑 `127.0.0.1`；`-m 1` 单客户端；`-O` 校验 Origin。
-- tmux 提供 WebSocket 断线重连后的会话保持；ttyd 终端尺寸跟随浏览器，避免 v1 upterm 固定 132x43 挤坏全屏的问题。
+- tmux 提供 WebSocket 断线重连后的会话保持；ttyd 终端尺寸跟随浏览器，避免 v1 upterm 固定字符尺寸挤坏全屏的问题。
 - menuconfig 的 TUI 依赖 PTY 与 xterm.js 兼容性；**未验证**，M4 用真实 menuconfig 做冒烟。
+- 端口、绑定地址与 `-W`/`-m 1`/`-O` 取自 `contracts/entry.json`，本文不另写数值。
 
 ### 10.4 图形入口（noVNC）
 
@@ -915,8 +927,9 @@ websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 &
 - 主鉴权：隧道侧一次性 token + SSH 密钥/WebRTC 信令鉴权 + actor 白名单。
 - 禁止 `0.0.0.0:6080`、禁止公网直连、禁止任何隧道中继；`ss -ltnp` 是验收项。
 - 图形入口用于必须鼠标操作的配置工具；普通 menuconfig 优先 terminal。
+- 端口 5900/6080、帧缓冲 1280x800x24 与 VNC 密码 8 位取自 `contracts/entry.json`，本文不另写数值。
 
-### 10.5 带宽与 CPU 代价（估算，未实测）
+### 10.5 带宽与 CPU 代价（人工审计：估算，未实测）
 
 | 入口 | 带宽 | CPU | 适用 |
 |---|---|---|---|
@@ -925,11 +938,11 @@ websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 &
 
 以上是工程估算，不是实测数据；M6 用 `nload`/`pidstat` 记录实际值。若图形入口连续刷新导致带宽/CPU 过高，优先关闭动画、降低分辨率、改用 terminal。
 
-### 10.6 6 小时硬上限下的取舍
+### 10.6 job 硬上限下的取舍（人工审计）
 
 - 默认只开 terminal；graphical 默认 30 min、上限 120 min，且必须在 `max_minutes` 内。
 - 图形入口的安装时间从会话预算里扣除；若安装 + 启动超过 `max_minutes` 的 20%，CLI 应警告并建议 terminal。
-- 6 小时硬上限前，watchdog 先停 graphical（它最耗资源），再收尾收集；不把图形会话拖到 360 min。
+- job 硬上限前，watchdog 先停 graphical（它最耗资源），再收尾收集；不把图形会话拖到 360 min。
 
 ### 10.7 可写/只读双链接
 
@@ -1134,7 +1147,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\arch-check.ps1
 | G-10 | 接口冻结 | `docs/接口冻结.md` 存在且版本化；两外壳 stub 编译通过；冻结后改动有变更记录 | R-D-9、本设计 13.7 |
 | G-11 | 一事一提交 | 提交前人工核对；CI 不强制 commit 粒度，但阶段验收检查 commit 数与阶段号 | R-T-9 |
 | G-12 | 版本递增 | `gate.ps1` 的 R-D-9：源码变更未 bump 版本即失败 | R-D-9、R-D-12 |
-| G-13 | 数值单一来源 | `contract-check`：文档正文的阈值/时长/上限/端口/状态码必须在 `contracts/` 有对应字段；当前机器校验覆盖 §5.7/§10.7 与接口冻结的 0.3.x 要点，其余段落按同一规则人工审计 | 本设计 5.9、R-D-13 |
+| G-13 | 数值单一来源 | `contract-check`：文档正文的阈值/时长/上限/端口/状态码必须在 `contracts/` 有对应字段；机器校验覆盖 design §2、§3.2、§5.6、§5.7、§5.10、§8.3、§9.4、§10.2（启停顺序）、§10.3、§10.4、§10.7 与接口冻结 §5.2–§5.4；§10.2 估算表、§10.5、§10.6 等显式标注“人工审计”，不纳入机器覆盖 | 本设计 5.9、R-D-13 |
 
 门禁配置（`gate.config.json`）必须体现：`crates/*/src/**/*.rs` 扫描、`//!` 头注释、`// ===== 组件名 =====` 分区、`tracing` 依赖、CLI 展示层 print 白名单。模板原件的 `tools/gate-template/` 保留，活动脚本在 `scripts/`。
 

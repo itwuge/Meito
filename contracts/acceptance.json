@@ -1,0 +1,18 @@
+{
+  "contractVersion": "0.3.2",
+  "purpose": "SC-01 一类验收指标的单一来源；验收脚本必须引用 metrics，不得在文档或脚本里另写数值",
+  "metrics": {
+    "sc01ColdStartP95Seconds": 180,
+    "sc01Samples": 10,
+    "sc04AuthFailureSeconds": 10,
+    "sc05TransferSizeMegabytes": 100,
+    "sc05TransferRepeats": 3,
+    "sc05ServerOverheadPercentMax": 5,
+    "sc07UnauthorizedStatuses": [401, 403],
+    "sc08MaxOverrunSeconds": 60,
+    "sc08IdleStopGraceMinutes": 5,
+    "sc08DownStopGraceSeconds": 60,
+    "sc13DefconfigRuns": 2,
+    "sc15FirstRunMinutes": 15
+  }
+}

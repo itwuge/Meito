@@ -6,7 +6,7 @@
 // ===== 契约常量 =====
 
 /// 当前冻结的契约版本，必须与 `contracts/contract-version.json` 一致。
-pub const CONTRACT_VERSION: &str = "0.3.1";
+pub const CONTRACT_VERSION: &str = "0.3.2";
 
 /// 会话日志路径前缀，完整路径为 `logs/session-<id>.jsonl`。
 pub const SESSION_LOG_PATH_PREFIX: &str = "logs/session-";
@@ -28,6 +28,7 @@ pub const ENV_LEDGER_PATH_PREFIX: &str = "logs/env-session-";
 
 mod controller;
 mod doctor;
+mod entry;
 mod env;
 mod error;
 mod log;
@@ -41,6 +42,7 @@ mod workflow;
 
 pub use controller::{ArtifactStore, Command, Controller, EntryAdapter, P2pProvider, SessionView};
 pub use doctor::{run_doctor, CheckStatus, DoctorCheck, DoctorReport, CONTRACT_FILES};
+pub use entry::{load_entry_ports, EntryPorts, ENTRY_CONTRACT_PATH};
 pub use env::{load_ledger, EnvironmentLedger};
 pub use error::{ErrorCode, MeitoError};
 pub use log::{
