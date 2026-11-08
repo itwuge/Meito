@@ -265,6 +265,57 @@ if ($null -ne $cp) {
     if ([int]$cp.serverHandling.maxCiphertextBytes -ne 16384) {
         Fail "CONTRACT_CP_SERVER" "单包密文上限必须为 16384 字节"
     }
+    foreach ($name in @("kdf", "aad", "keyPair", "ephemeralKey", "keyLifecycle", "testVectors")) {
+        if ($cp.PSObject.Properties.Name -notcontains $name) {
+            Fail "CONTRACT_CP_KDF" "连接包契约缺少 $name 段"
+        }
+    }
+    if ([string]$cp.kdf.algorithm -ne "HKDF-SHA256" -or [string]$cp.kdf.hash -ne "sha256") {
+        Fail "CONTRACT_CP_KDF" "连接包 KDF 必须为 HKDF-SHA256"
+    }
+    if ([string]$cp.kdf.salt -ne "" -or [string]$cp.kdf.saltPolicy -ne "empty-string-fixed") {
+        Fail "CONTRACT_CP_KDF" "HKDF salt 必须固定为空串"
+    }
+    if ([string]$cp.kdf.info -ne "meito-v1/connection-package") {
+        Fail "CONTRACT_CP_KDF" "HKDF info 必须绑定 meito-v1/connection-package"
+    }
+    if ([int]$cp.kdf.outputBytes -ne 32 -or $cp.kdf.rawSharedSecretAsKey -ne $false) {
+        Fail "CONTRACT_CP_KDF" "HKDF 必须输出 32 字节且禁止直接把共享密钥当 AEAD 密钥"
+    }
+    if ([string]$cp.aad.policy -ne "none" -or [int]$cp.aad.aadBytes -ne 0 -or [string]$cp.algorithm.aad -ne "none") {
+        Fail "CONTRACT_CP_AAD" "连接包必须写死无 AAD（policy=none、aadBytes=0）"
+    }
+    if ([string]$cp.ephemeralKey.generatedPer -ne "package" -or [string]$cp.ephemeralKey.lifetime -ne "per-package" -or $cp.ephemeralKey.privateKeyExport -ne $false -or $cp.ephemeralKey.zeroizeAfterUse -ne $true) {
+        Fail "CONTRACT_CP_LIFECYCLE" "临时密钥必须每包生成、不导出、用后清零"
+    }
+    if ([string]$cp.keyPair.generatedOn -ne "local" -or [string]$cp.keyPair.lifetime -ne "per-job" -or $cp.keyPair.privateKeyExport -ne $false -or $cp.keyPair.zeroizeAfterUse -ne $true) {
+        Fail "CONTRACT_CP_LIFECYCLE" "接收方密钥必须每作业生成、不导出、用后清零"
+    }
+    foreach ($flag in @("ephemeralKeyPerPackage", "recipientKeyPerJob", "sharedSecretZeroizeAfterKeyDerivation", "derivedKeyZeroizeAfterUse", "ephemeralPrivateKeyZeroizeAfterSeal", "recipientPrivateKeyZeroizeAfterOpen", "bestEffort")) {
+        if ($cp.keyLifecycle.$flag -ne $true) {
+            Fail "CONTRACT_CP_LIFECYCLE" "keyLifecycle.$flag 必须为 true"
+        }
+    }
+    if ([string]$cp.keyLifecycle.zeroizeImplementation -ne "zeroize" -or $cp.keyLifecycle.privateKeyExport -ne $false -or $cp.keyLifecycle.forensicResistance -ne $false) {
+        Fail "CONTRACT_CP_LIFECYCLE" "清零必须声明为 zeroize 尽力而为，且不得声称可抵御内存取证"
+    }
+    $vectorSource = [string]$cp.testVectors.source
+    if ([string]::IsNullOrWhiteSpace($vectorSource) -or -not (Test-Path -LiteralPath $vectorSource)) {
+        Fail "CONTRACT_CP_VECTOR" "固定向量生成脚本不存在：$vectorSource"
+    } else {
+        $vectorText = Get-Content -LiteralPath $vectorSource -Raw -Encoding UTF8
+        foreach ($needle in @("HKDF-SHA256", "meito-v1/connection-package", "crypto_aead_xchacha20poly1305_ietf_encrypt")) {
+            if ($vectorText -notmatch [regex]::Escape($needle)) {
+                Fail "CONTRACT_CP_VECTOR" "向量生成脚本缺少：$needle"
+            }
+        }
+    }
+    if ([string]$cp.testVectors.command -notmatch [regex]::Escape($vectorSource)) {
+        Fail "CONTRACT_CP_VECTOR" "testVectors.command 必须引用 $vectorSource"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$cp.testVectors.consumer)) {
+        Fail "CONTRACT_CP_VECTOR" "testVectors.consumer 不得为空"
+    }
 }
 
 $udp = Load-Json "contracts/udp-probe.json"
@@ -681,7 +732,7 @@ $docSections = @(
     @{ File = "docs/design.md"; Start = "^###\s+3\.2\s"; End = "^###\s+3\.2\.1\s" },
     @{ File = "docs/design.md"; Start = "^###\s+5\.6\s"; End = "^###\s+5\.7\s" },
     @{ File = "docs/design.md"; Start = "^###\s+5\.7\s"; End = "^###\s+5\.8\s" },
-    @{ File = "docs/design.md"; Start = "^###\s+5\.10\s"; End = "^##\s+6\." },
+    @{ File = "docs/design.md"; Start = "^###\s+5\.10\s"; End = "^###\s+5\.11\s" },
     @{ File = "docs/design.md"; Start = "^###\s+8\.3\s"; End = "^###\s+8\.4\s" },
     @{ File = "docs/design.md"; Start = "^###\s+9\.4\s"; End = "^###\s+9\.5\s" },
     @{ File = "docs/design.md"; Start = "^###\s+10\.2\s"; End = "^依赖安装耗时" },
@@ -692,7 +743,8 @@ $docSections = @(
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.3\s"; End = "^##\s+5\.4\s" },
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.4\s"; End = "^##\s+5\.5\s" },
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.5\s"; End = "^##\s+5\.6\s" },
-    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.6\s"; End = "^##\s+6\." }
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.6\s"; End = "^##\s+5\.7\s" },
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.7\s"; End = "^##\s+6\." }
 )
 foreach ($section in $docSections) {
     $body = Get-DocSection $section.File $section.Start $section.End
@@ -767,5 +819,5 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义/entry 端口/acceptance 指标与轻量预算一致；图形入口字段为 reserved/optional，不阻塞 v1；文档数值可回溯契约，人工审计项已显式标注）" -ForegroundColor Green
+Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义/entry 端口/acceptance 指标与轻量预算一致；连接包 HKDF/AAD/密钥生命周期/向量脚本一致；图形入口字段为 reserved/optional，不阻塞 v1；文档数值可回溯契约，人工审计项已显式标注）" -ForegroundColor Green
 exit 0

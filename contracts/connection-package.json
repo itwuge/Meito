@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.4",
+  "contractVersion": "0.3.5",
   "purpose": "runner 侧加密连接包的唯一格式定义；meito-link 只存密文，不解析、不记录",
   "magic": "MEITO1",
   "magicBytes": 6,
@@ -15,13 +15,58 @@
   "algorithmIds": [
     { "id": 0, "name": "x25519-xchacha20poly1305" }
   ],
+  "kdf": {
+    "algorithm": "HKDF-SHA256",
+    "hash": "sha256",
+    "ikm": "x25519-shared-secret",
+    "salt": "",
+    "saltPolicy": "empty-string-fixed",
+    "saltNote": "按 RFC 5869，空串 salt 等价于 HashLen 个零字节；本契约固定用空串，禁止改为「魔数+格式版本」或其他取值",
+    "info": "meito-v1/connection-package",
+    "infoBinding": {
+      "protocolVersion": "meito-v1",
+      "purpose": "connection-package"
+    },
+    "outputBytes": 32,
+    "usedAs": "xchacha20-poly1305-key",
+    "rawSharedSecretAsKey": false
+  },
+  "aad": {
+    "policy": "none",
+    "aadBytes": 0,
+    "note": "AEAD 不传 AAD（空 AAD）。启用或改变 AAD 必须提升 formatVersion 并新增 algorithm id；不得在 formatVersion=1 上改变 AAD 语义"
+  },
   "keyPair": {
-    "generatedOn": "runner",
+    "role": "recipient",
+    "generatedOn": "local",
     "lifetime": "per-job",
     "reuse": false,
     "privateKeyExport": false,
     "zeroizeAfterUse": true,
     "publicKeyTransport": "workflow input channel_public_key"
+  },
+  "ephemeralKey": {
+    "role": "sender",
+    "generatedOn": "runner",
+    "generatedPer": "package",
+    "lifetime": "per-package",
+    "reuse": false,
+    "privateKeyExport": false,
+    "zeroizeAfterUse": true,
+    "publicKeyLocation": "layout.ephemeral_public_key"
+  },
+  "keyLifecycle": {
+    "ephemeralKeyPerPackage": true,
+    "recipientKeyPerJob": true,
+    "privateKeyExport": false,
+    "sharedSecretZeroizeAfterKeyDerivation": true,
+    "derivedKeyZeroizeAfterUse": true,
+    "ephemeralPrivateKeyZeroizeAfterSeal": true,
+    "recipientPrivateKeyZeroizeAfterOpen": true,
+    "zeroizeImplementation": "zeroize",
+    "bestEffort": true,
+    "forensicResistance": false,
+    "claim": "清零为尽力而为（zeroize）：仅覆盖本进程持有的缓冲区，且依赖编译器不优化掉清零；不声称可抵御内存取证、交换分区、核心转储或冷启动攻击"
   },
   "encoding": {
     "container": "binary",
@@ -54,5 +99,19 @@
     "log": false,
     "retention": "until-session-end",
     "maxCiphertextBytes": 16384
+  },
+  "testVectors": {
+    "source": "scripts/gen-connection-package-vector.py",
+    "command": "python scripts/gen-connection-package-vector.py",
+    "dependency": "PyNaCl==1.6.2（pip install pynacl==1.6.2）",
+    "outputFormat": "json",
+    "consumer": "crates/meito-core/tests/connection_package.rs",
+    "deterministicInputs": {
+      "recipientSecret": "RFC 7748 §6.1 Alice 私钥（十六进制）",
+      "ephemeralSecret": "RFC 7748 §6.1 Bob 私钥（十六进制）",
+      "nonce": "24 字节 0x00..0x17",
+      "plaintext": "固定 JSON，键按字典序序列化"
+    },
+    "note": "实现改为 HKDF 派生密钥后，必须用同一脚本重新生成固定向量；脚本不含系统随机源，连续两次输出必须逐字节一致"
   }
 }

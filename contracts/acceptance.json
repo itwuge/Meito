@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.4",
+  "contractVersion": "0.3.5",
   "purpose": "SC-01 一类验收指标与轻量性预算的单一来源；验收脚本必须引用 metrics/lightweight，不得在文档或脚本里另写数值。图形入口相关指标为 optional，不阻塞 v1 验收",
   "requiredness": {
     "sc01ColdStartP95Seconds": "required",
