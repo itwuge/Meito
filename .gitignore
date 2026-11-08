@@ -17,6 +17,7 @@
 .env.*
 *.pem
 *.key
+*.token
 id_rsa*
 known_hosts*
 
