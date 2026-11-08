@@ -179,6 +179,11 @@ if ($null -ne $log -and $null -ne $sm) {
 # ===== Workflow 契约 =====
 $wf = Load-Json "contracts/workflow.json"
 if ($null -ne $wf) {
+    foreach ($sectionName in @("triggerPolicy", "accessModes", "terminalCapability", "fileTransfer", "connectionDelivery", "sessionLifecycle", "failureUx", "buildCache")) {
+        if ($wf.PSObject.Properties.Name -notcontains $sectionName) {
+            Fail "CONTRACT_WF_STRUCT" "workflow.json 缺少 $sectionName 段"
+        }
+    }
     if ($wf.byoTurn.enabled -ne $false) { Fail "CONTRACT_BYO_TURN" "workflow.json 的 BYO TURN 默认必须关闭" }
     if ([int]$wf.timeoutMinutes -ne 360) { Fail "CONTRACT_WF_TIMEOUT" "workflow timeoutMinutes 必须为 360" }
     if ([int]$wf.sessionMaxMinutes -gt 300) { Fail "CONTRACT_WF_TIMEOUT" "workflow sessionMaxMinutes 不得超过 300" }
@@ -191,6 +196,14 @@ if ($null -ne $wf) {
     }
     foreach ($required in @("session_id", "ref", "max_minutes", "idle_minutes", "p2p_provider", "entry", "channel", "channel_write_token", "channel_public_key", "flags")) {
         if (-not $inputNames.ContainsKey($required)) { Fail "CONTRACT_WF_INPUTS" "缺少冻结输入：$required" }
+    }
+    $entryInput = $wf.inputs | Where-Object { $_.name -eq "entry" }
+    if (@($entryInput.enum).Count -ne 1 -or @($entryInput.enum)[0] -ne "terminal") {
+        Fail "CONTRACT_WF_ENTRY" "V1 entry 输入只能为 terminal（图形与 SSH 已移除）"
+    }
+    $flagsInput = $wf.inputs | Where-Object { $_.name -eq "flags" }
+    if (@($flagsInput.fields) -contains "allow_graphical") {
+        Fail "CONTRACT_WF_ENTRY" "V1 已移除图形入口，flags 不得保留 allow_graphical"
     }
     $channel = $wf.inputs | Where-Object { $_.name -eq "channel" }
     if ([int]$channel.maxLength -gt 128) { Fail "CONTRACT_WF_CHANNEL" "channel 必须是不透明 id 且不超过 128 字符" }
@@ -225,6 +238,102 @@ if ($null -ne $wf) {
     }
     if ($wf.outputs.connectionPackage.inArtifact -ne $false -or $wf.outputs.connectionPackage.inLog -ne $false) {
         Fail "CONTRACT_WF_SECRET" "连接包不得写入 artifact 或日志"
+    }
+    if ($wf.triggerPolicy.workflowDispatch -ne $true) {
+        Fail "CONTRACT_WF_TRIGGER" "workflow_dispatch 必须保留"
+    }
+    $webhook = $wf.triggerPolicy.keywordWebhook
+    if ($webhook.enabled -ne $true -or [string]$webhook.keyword -ne "meito") {
+        Fail "CONTRACT_WF_TRIGGER" "关键词 webhook 必须启用且关键词为 meito"
+    }
+    if ([string]$webhook.unauthorizedActor -ne "reject" -or [string]$webhook.authorizationSource -ne "flags.allowed_actors" -or $webhook.failClosed -ne $true -or [string]$webhook.unauthorizedErrorCode -ne "E_ACTOR_NOT_ALLOWED") {
+        Fail "CONTRACT_WF_TRIGGER" "非授权 actor 必须 fail-closed 拒绝并报 E_ACTOR_NOT_ALLOWED"
+    }
+    if ([string]$wf.accessModes.v1Primary -ne "browser-websocket" -or $wf.accessModes.browserTerminal -ne $true) {
+        Fail "CONTRACT_WF_ACCESS" "V1 唯一入口必须为浏览器 WebSocket 终端"
+    }
+    if ([string]$wf.accessModes.ssh -ne "removed") {
+        Fail "CONTRACT_WF_ACCESS" "V1 必须移除 SSH 入口，取值固定为 removed"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$wf.accessModes.sshRemovalReason)) {
+        Fail "CONTRACT_WF_ACCESS" "移除 SSH 入口必须记录理由"
+    }
+    $wfRaw = Get-Content -LiteralPath "contracts/workflow.json" -Raw -Encoding UTF8
+    if ($wfRaw -match "tls-tunnel|raw-ssh-port|ssh-terminal|sshFlag") {
+        Fail "CONTRACT_WF_ACCESS" "workflow 契约不得保留 SSH 入口取值或字段"
+    }
+    $terminal = $wf.terminalCapability
+    if ([string]$terminal.mode -ne "browser-websocket" -or [string]$terminal.implementation -ne "ttyd") {
+        Fail "CONTRACT_WF_TERMINAL" "终端能力必须为 ttyd 形态的浏览器 WebSocket"
+    }
+    if ([string]$terminal.tuiSupport -ne "full" -or $terminal.menuconfigSupported -ne $true) {
+        Fail "CONTRACT_WF_TERMINAL" "必须完整支持 TUI 与 make menuconfig"
+    }
+    if ($terminal.readOnlyToken -ne $true -or $terminal.writeToken -ne $true) {
+        Fail "CONTRACT_WF_TERMINAL" "只读/可写两种 token 必须保留"
+    }
+    if ([int]$terminal.publicPort -ne 443) {
+        Fail "CONTRACT_WF_TERMINAL" "浏览器终端必须复用 443"
+    }
+    $transfer = $wf.fileTransfer
+    if ([string]$transfer.method -ne "artifact+local-pull-apply" -or $transfer.onlyPath -ne $true -or $transfer.scp -ne $false -or $transfer.sshDependent -ne $false) {
+        Fail "CONTRACT_WF_TRANSFER" "配置回传唯一路径必须为 artifact + 本地 pull --apply，且不得依赖 scp/SSH"
+    }
+    if ([string]$transfer.artifactContract -ne "contracts/artifact-manifest.schema.json" -or [string]$transfer.localCommand -ne "meito pull --apply") {
+        Fail "CONTRACT_WF_TRANSFER" "fileTransfer 必须引用 artifact 契约与 meito pull --apply"
+    }
+    $delivery = $wf.connectionDelivery
+    if ($delivery.oneTime -ne $true -or [string]$delivery.redelivery -ne "denied") {
+        Fail "CONTRACT_WF_DELIVERY" "连接信息必须一次性下发且禁止重复投递"
+    }
+    if ($delivery.inLog -ne $false -or $delivery.inArtifact -ne $false -or $delivery.inJobSummary -ne $false) {
+        Fail "CONTRACT_WF_DELIVERY" "连接串不得进入日志、artifact 或 Job Summary"
+    }
+    if ([string]$delivery.jobSummary.content -ne "status-and-presence-flags-only" -or [string]$delivery.jobSummary.readyStatus -ne "ready") {
+        Fail "CONTRACT_WF_DELIVERY" "Job Summary 只允许就绪状态与存在性标记"
+    }
+    if ([string]$delivery.localDisplay -ne "local-cli-only") {
+        Fail "CONTRACT_WF_DELIVERY" "连接信息只允许在本地 CLI 显示"
+    }
+    $lifecycle = $wf.sessionLifecycle
+    if ([string]$lifecycle.processModel -ne "build-parent-session-child" -or [string]$lifecycle.sessionProcess -ne "child" -or [string]$lifecycle.buildOrchestrator -ne "parent") {
+        Fail "CONTRACT_WF_LIFECYCLE" "会话进程必须是构建编排进程的子进程"
+    }
+    if ([string]$lifecycle.buildStartsWhen -ne "session-exit" -or $lifecycle.requiresSecondUserAction -ne $false) {
+        Fail "CONTRACT_WF_LIFECYCLE" "会话退出后必须自动续编，且不要求第二次用户操作"
+    }
+    foreach ($event in @("ctrl-d", "exit-command", "process-exit")) {
+        if (@($lifecycle.exitEvents) -notcontains $event) {
+            Fail "CONTRACT_WF_LIFECYCLE" "exitEvents 缺少：$event"
+        }
+    }
+    if ([string]$lifecycle.onExitCodeZero -ne "continue-build" -or [string]$lifecycle.onExitCodeNonZero -ne "abort-build-and-fail-job" -or [string]$lifecycle.nonZeroErrorCode -ne "E_ENTRY" -or $lifecycle.silentContinue -ne $false) {
+        Fail "CONTRACT_WF_LIFECYCLE" "退出码 0 才续编；非 0 必须中止、报 E_ENTRY 且不得静默继续"
+    }
+    $webUx = $wf.failureUx.webTerminal
+    if ($webUx.blackScreenSelfRescue -ne $false -or $webUx.ctrlCSelfRescue -ne $false -or $webUx.showExplicitError -ne $true) {
+        Fail "CONTRACT_WF_UX" "网页终端不得要求黑屏按 Ctrl+C 自救，必须显示明确错误"
+    }
+    foreach ($action in @("show-error-code", "show-reason", "switch-to-local")) {
+        if (@($webUx.actions) -notcontains $action) {
+            Fail "CONTRACT_WF_UX" "failureUx.actions 缺少：$action"
+        }
+    }
+    if ([string]$webUx.switchToLocal -ne "one-click" -or $webUx.errorMustNotContainConnectionString -ne $true) {
+        Fail "CONTRACT_WF_UX" "必须提供一键转本地版，且错误信息不得含连接串"
+    }
+    $cache = $wf.buildCache
+    if ($cache.ccache.persist -ne $true -or $cache.dlCache.persist -ne $true -or $cache.buildDirIncremental -ne $true) {
+        Fail "CONTRACT_WF_CACHE" "ccache 与 dl/ 必须持久化，构建目录必须增量复用"
+    }
+    if ([string]$cache.parallelism -ne "job-count-equals-cpu-cores") {
+        Fail "CONTRACT_WF_CACHE" "并行任务数必须跟随 CPU 核数"
+    }
+    if ($cache.coldBuildSpeedupPromise -ne $false -or [string]$cache.measuredScenario -ne "second-and-later-run") {
+        Fail "CONTRACT_WF_CACHE" "不得承诺冷构建加速，验收只针对第二次及以后"
+    }
+    if ([string]$cache.metricsContract -ne "contracts/acceptance.json#buildSpeed") {
+        Fail "CONTRACT_WF_CACHE" "构建加速指标必须引用 acceptance.json#buildSpeed"
     }
 }
 
@@ -442,27 +551,43 @@ if ($null -ne $entry) {
         }
     }
     $promoted = $false
+    $entryGraphicalStatus = [string]$entry.graphical.status
     foreach ($key in $graphicalKeys) {
         $state = [string]$entry.requiredness.$key
         if ($state -eq "required") {
             $promoted = $true
+        } elseif ($state -eq "not-applicable") {
+            if ($entryGraphicalStatus -ne "not-supported") {
+                Fail "CONTRACT_ENTRY_REQUIREDNESS" "只有 graphical.status=not-supported 时 $key 才可为 not-applicable"
+            }
         } elseif ($state -ne "reserved" -and $state -ne "optional") {
-            Fail "CONTRACT_ENTRY_REQUIREDNESS" "$key 必须为 reserved/optional，当前为 $state"
+            Fail "CONTRACT_ENTRY_REQUIREDNESS" "$key 必须为 not-applicable/reserved/optional，当前为 $state"
         }
     }
     if (-not $promoted) {
-        if ([string]$entry.graphical.status -ne "reserved") {
-            Fail "CONTRACT_ENTRY_GRAPHICAL" "graphical.status 必须为 reserved"
+        if ($entryGraphicalStatus -ne "not-supported" -or $entry.graphical.v1Enabled -ne $false) {
+            Fail "CONTRACT_ENTRY_GRAPHICAL" "V1 图形入口必须为 not-supported 且 v1Enabled=false"
         }
-        if ([string]$entry.graphical.reason -notmatch "渲染方案待定") {
-            Fail "CONTRACT_ENTRY_GRAPHICAL" "graphical.reason 必须说明渲染方案待定"
+        if ([string]$entry.graphical.reason -notmatch "V1 明确不做图形") {
+            Fail "CONTRACT_ENTRY_GRAPHICAL" "graphical.reason 必须说明 V1 不做图形"
+        }
+        if ([string]$entry.v1GraphicalFallback.status -ne "not-supported" -or $entry.v1GraphicalFallback.v1Enabled -ne $false) {
+            Fail "CONTRACT_ENTRY_GRAPHICAL" "v1GraphicalFallback 必须为 not-supported 且 v1Enabled=false"
+        }
+        if (@($entry.v1GraphicalFallback.removed) -notcontains "ssh-x11-forwarding") {
+            Fail "CONTRACT_ENTRY_GRAPHICAL" "v1GraphicalFallback.removed 必须记录 ssh-x11-forwarding 已移除"
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$entry.v1GraphicalFallback.removalReason)) {
+            Fail "CONTRACT_ENTRY_GRAPHICAL" "移除 ssh-x11-forwarding 必须记录理由"
+        }
+        foreach ($removedKey in @("transport", "sshFlag", "localXServer", "webCandidates")) {
+            if ($entry.v1GraphicalFallback.PSObject.Properties.Name -contains $removedKey) {
+                Fail "CONTRACT_ENTRY_GRAPHICAL" "v1GraphicalFallback 不得保留 $removedKey（SSH 相关字段必须移除）"
+            }
         }
     }
-    if ([string]$entry.v1GraphicalFallback.status -ne "required" -or [string]$entry.v1GraphicalFallback.sshFlag -ne "-X") {
-        Fail "CONTRACT_ENTRY_GRAPHICAL" "v1GraphicalFallback 必须为 required 且 sshFlag=-X"
-    }
-    if ((@($entry.v1GraphicalFallback.webCandidates) -join ",") -notmatch "KasmVNC" -or (@($entry.v1GraphicalFallback.webCandidates) -join ",") -notmatch "noVNC") {
-        Fail "CONTRACT_ENTRY_GRAPHICAL" "webCandidates 必须包含 KasmVNC 与 noVNC 兜底"
+    if ((@($entry.v1GraphicalFallback.futureCandidates) -join ",") -notmatch "KasmVNC" -or (@($entry.v1GraphicalFallback.futureCandidates) -join ",") -notmatch "noVNC") {
+        Fail "CONTRACT_ENTRY_GRAPHICAL" "futureCandidates 必须包含 KasmVNC 与 noVNC 候选"
     }
     $changeLog = Get-Content -LiteralPath "docs/变更记录.md" -Raw -Encoding UTF8
     if ($promoted -and -not [regex]::IsMatch($changeLog, "(?m)^#{2,3}\s+.*图形入口转正")) {
@@ -471,16 +596,19 @@ if ($null -ne $entry) {
 }
 if ($null -ne $acceptance) {
     $acceptancePromoted = $false
-    foreach ($metric in @($acceptance.graphical.optionalMetrics)) {
+    foreach ($metric in @($acceptance.graphical.notApplicableMetrics)) {
         $metricState = [string]$acceptance.requiredness.$metric
         if ($metricState -eq "required") {
             $acceptancePromoted = $true
-        } elseif ($metricState -ne "optional") {
-            Fail "CONTRACT_ACCEPTANCE_GRAPHICAL" "$metric 必须为 optional，当前为 $metricState"
+        } elseif ($metricState -ne "not-applicable") {
+            Fail "CONTRACT_ACCEPTANCE_GRAPHICAL" "$metric 必须为 not-applicable，当前为 $metricState"
         }
     }
-    if (-not $acceptancePromoted -and [string]$acceptance.graphical.status -ne "reserved") {
-        Fail "CONTRACT_ACCEPTANCE_GRAPHICAL" "acceptance.graphical.status 必须为 reserved"
+    if (-not $acceptancePromoted -and ([string]$acceptance.graphical.status -ne "not-supported" -or $acceptance.graphical.v1Enabled -ne $false)) {
+        Fail "CONTRACT_ACCEPTANCE_GRAPHICAL" "V1 图形指标必须 not-supported 且 v1Enabled=false"
+    }
+    if (@($acceptance.graphical.notApplicableMetrics) -notcontains "sc07VncPasswordOnlyMustFail") {
+        Fail "CONTRACT_ACCEPTANCE_GRAPHICAL" "sc07VncPasswordOnlyMustFail 必须列入 notApplicableMetrics"
     }
     if ($acceptancePromoted) {
         $changeLog = Get-Content -LiteralPath "docs/变更记录.md" -Raw -Encoding UTF8
@@ -489,7 +617,7 @@ if ($null -ne $acceptance) {
         }
     }
     if ($acceptance.metrics.sc07VncPasswordOnlyMustFail -ne $true) {
-        Fail "CONTRACT_ACCEPTANCE_GRAPHICAL" "sc07VncPasswordOnlyMustFail 必须保留为 true（图形鉴权预留）"
+        Fail "CONTRACT_ACCEPTANCE_GRAPHICAL" "sc07VncPasswordOnlyMustFail 必须保留为 true（历史取值，V1 不判）"
     }
 }
 
@@ -526,6 +654,62 @@ if ($null -eq $lightweight) {
     foreach ($key in (@($fixedBudgets.Keys) + $pendingBudgets)) {
         if ([string]::IsNullOrWhiteSpace([string]$lightweight.methods.$key)) {
             Fail "CONTRACT_LIGHTWEIGHT" "lightweight.methods.$key 缺少测法（不可执行）"
+        }
+    }
+}
+
+# ===== 构建加速（0.3.6）：仅第二次及以后命中场景 =====
+$buildSpeed = $acceptance.buildSpeed
+if ($null -eq $buildSpeed) {
+    Fail "CONTRACT_BUILD_SPEED" "acceptance.json 缺少 buildSpeed 段"
+} else {
+    if ([string]$buildSpeed.scope -ne "second-and-later-run-with-warm-cache" -or $buildSpeed.coldBuildSpeedupPromise -ne $false) {
+        Fail "CONTRACT_BUILD_SPEED" "只验收第二次及以后的命中场景，不得承诺冷构建加速"
+    }
+    if ($buildSpeed.metrics.dlCacheReuseRequired -ne $true -or $buildSpeed.metrics.buildDirIncrementRequired -ne $true -or $buildSpeed.metrics.parallelJobsFollowsCpuCores -ne $true) {
+        Fail "CONTRACT_BUILD_SPEED" "dl/ 保留、目录增量复用与 -j 跟随核数必须为 true"
+    }
+    foreach ($key in @("ccacheHitRateMinPercent", "warmBuildDurationRatioMax")) {
+        if ([string]$buildSpeed.metrics.$key -ne "pending-calibration") {
+            Fail "CONTRACT_BUILD_SPEED" "buildSpeed.metrics.$key 必须为 pending-calibration"
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$buildSpeed.pendingCalibration.$key.neededMeasurement) -or [string]::IsNullOrWhiteSpace([string]$buildSpeed.pendingCalibration.$key.calibratedBy)) {
+            Fail "CONTRACT_BUILD_SPEED" "buildSpeed.pendingCalibration.$key 缺少 neededMeasurement/calibratedBy"
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$buildSpeed.methods.$key)) {
+            Fail "CONTRACT_BUILD_SPEED" "buildSpeed.methods.$key 缺少测法"
+        }
+    }
+}
+
+# ===== 协调节点（0.3.6）：只信令/STUN/静态页，不承载业务流量 =====
+$coordination = $acceptance.coordination
+if ($null -eq $coordination) {
+    Fail "CONTRACT_COORDINATION" "acceptance.json 缺少 coordination 段"
+} else {
+    if ([int]$coordination.metrics.coordinationBandwidthMbpsMax -ne 3) {
+        Fail "CONTRACT_COORDINATION" "协调节点带宽红线必须为 3 Mbps"
+    }
+    if ($coordination.metrics.coordinationCarriesSessionTraffic -ne $false) {
+        Fail "CONTRACT_COORDINATION" "协调节点不得承载会话流量"
+    }
+    if ([string]$coordination.metrics.coordinationSessionBytesMax -ne "pending-calibration") {
+        Fail "CONTRACT_COORDINATION" "节点侧会话字节上限必须为 pending-calibration"
+    }
+    foreach ($key in @("coordinationBandwidthMbpsMax", "coordinationCarriesSessionTraffic", "coordinationSessionBytesMax")) {
+        if ([string]::IsNullOrWhiteSpace([string]$coordination.methods.$key)) {
+            Fail "CONTRACT_COORDINATION" "coordination.methods.$key 缺少测法"
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$coordination.pendingCalibration.coordinationSessionBytesMax.neededMeasurement) -or [string]::IsNullOrWhiteSpace([string]$coordination.pendingCalibration.coordinationSessionBytesMax.calibratedBy)) {
+        Fail "CONTRACT_COORDINATION" "coordinationSessionBytesMax 缺少标定说明"
+    }
+    if ($coordination.relayForbidden -ne $true) {
+        Fail "CONTRACT_COORDINATION" "禁止把业务流量改为经协调节点转发"
+    }
+    foreach ($action in @("degrade-graphics-quality", "switch-to-local")) {
+        if (@($coordination.onBandwidthExceeded) -notcontains $action) {
+            Fail "CONTRACT_COORDINATION" "带宽超限只能降级画质或转本地版"
         }
     }
 }
@@ -620,6 +804,66 @@ if ($null -ne $link) {
     }
     if ($link.logging.blobLogged -ne $false -or $link.logging.hashLogged -ne $false) {
         Fail "CONTRACT_LINK_LOG" "blob 与摘要均不得落日志"
+    }
+    $deploy = $link.deployment
+    if ($link.PSObject.Properties.Name -notcontains "deployment" -or $null -eq $deploy) {
+        Fail "CONTRACT_LINK_DEPLOY" "link.json 缺少 deployment 段"
+    } else {
+        if ([string]$deploy.publicResources.ipv4 -ne "47.109.32.249" -or [string]$deploy.publicResources.domain -ne "wuge.fun" -or $deploy.publicResources.icpRegistered -ne $true) {
+            Fail "CONTRACT_LINK_DEPLOY" "公网资源必须为 47.109.32.249 + wuge.fun（已备案）"
+        }
+        foreach ($hostName in @("meito.wuge.fun")) {
+            foreach ($role in @("entry", "signaling", "stun", "staticPage")) {
+                if ([string]$deploy.hostnames.$role -ne $hostName) {
+                    Fail "CONTRACT_LINK_DEPLOY" "hostnames.$role 必须为 $hostName"
+                }
+            }
+        }
+        $publicPorts = @($deploy.ingress.publicPorts)
+        if ($publicPorts.Count -ne 1 -or [int]$publicPorts[0] -ne 443 -or $deploy.ingress.publicPortSetIsSingleton443 -ne $true) {
+            Fail "CONTRACT_LINK_PORT" "对外端口集合必须为 {443}"
+        }
+        foreach ($transport in @("tcp", "udp")) {
+            if (@($deploy.ingress.transports) -notcontains $transport) {
+                Fail "CONTRACT_LINK_PORT" "443 必须同时声明 $transport"
+            }
+        }
+        foreach ($capability in @("entry-page", "signaling", "stun", "terminal-websocket", "control-api", "tls")) {
+            if (@($deploy.ingress.reuse443For) -notcontains $capability) {
+                Fail "CONTRACT_LINK_PORT" "443 复用能力缺少：$capability"
+            }
+        }
+        if (@($deploy.ingress.reuse443For) -contains "ssh-tls-tunnel" -or @($deploy.ingress.reuse443For) -contains "ssh-terminal") {
+            Fail "CONTRACT_LINK_PORT" "V1 已移除 SSH 入口，443 不得保留 SSH 复用项"
+        }
+        if ($deploy.ingress.rawSshPortAllowed -ne $false -or @($deploy.ingress.additionalPorts).Count -ne 0 -or [string]$deploy.ingress.additionalPortsRegistration -ne "security-group+contract" -or $deploy.ingress.wildcardBind -ne $false) {
+            Fail "CONTRACT_LINK_PORT" "禁止裸 SSH 端口、额外端口与通配绑定"
+        }
+        if ($deploy.ingress.newPortRequiresContractBump -ne $true -or $deploy.ingress.newPortRequiresChangeLog -ne $true) {
+            Fail "CONTRACT_LINK_PORT" "新增对外端口必须升契约版本并写变更记录"
+        }
+        if ([string]$deploy.tls.source -ne "acme" -or [string]$deploy.tls.challenge -ne "dns-01" -or [string]$deploy.tls.renewal -ne "automated" -or [int]$deploy.tls.renewBeforeDays -ne 30) {
+            Fail "CONTRACT_LINK_TLS" "TLS 必须为 ACME DNS-01 自动续期且提前 30 天"
+        }
+        if ($deploy.trafficBoundary.coordinationOnly -ne $true -or $deploy.trafficBoundary.carriesSessionTraffic -ne $false -or [string]$deploy.trafficBoundary.sessionTransport -ne "p2p-direct") {
+            Fail "CONTRACT_LINK_TRAFFIC" "协调节点只做打洞/信令，会话必须 P2P 直连"
+        }
+        foreach ($item in @("terminal-bytes", "ssh-bytes", "graphics-bytes", "file-transfer", "relay")) {
+            if (@($deploy.trafficBoundary.forbiddenTraffic) -notcontains $item) {
+                Fail "CONTRACT_LINK_TRAFFIC" "trafficBoundary.forbiddenTraffic 缺少：$item"
+            }
+        }
+        if ([string]$deploy.trafficBoundary.byteCounting.maxSessionBytesRef -ne "acceptance.json#coordination.coordinationSessionBytesMax" -or [string]$deploy.trafficBoundary.byteCounting.failOnExceed -ne "abort-session" -or $deploy.trafficBoundary.byteCounting.excludeP2PDirectBytes -ne $true) {
+            Fail "CONTRACT_LINK_TRAFFIC" "节点侧字节计数必须引用验收项且在超限时中止"
+        }
+        if ([string]$deploy.bandwidth.redLineMbpsRef -ne "acceptance.json#coordination.coordinationBandwidthMbpsMax" -or $deploy.bandwidth.carriesBusinessTraffic -ne $false -or $deploy.bandwidth.expandForwardingForbidden -ne $true) {
+            Fail "CONTRACT_LINK_BANDWIDTH" "带宽红线必须引用验收项且禁止扩容转发"
+        }
+        foreach ($action in @("degrade-graphics-quality", "switch-to-local")) {
+            if (@($deploy.bandwidth.onExceed) -notcontains $action) {
+                Fail "CONTRACT_LINK_BANDWIDTH" "带宽超限只能降级画质或转本地版"
+            }
+        }
     }
     if ($link.PSObject.Properties.Name -contains "maxCiphertextBytes") {
         Fail "CONTRACT_LINK_LIMIT" "link.json 不得复写单包上限数值"
@@ -744,7 +988,8 @@ $docSections = @(
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.4\s"; End = "^##\s+5\.5\s" },
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.5\s"; End = "^##\s+5\.6\s" },
     @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.6\s"; End = "^##\s+5\.7\s" },
-    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.7\s"; End = "^##\s+6\." }
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.7\s"; End = "^##\s+5\.8\s" },
+    @{ File = "docs/接口冻结.md"; Start = "^##\s+5\.8\s"; End = "^##\s+6\." }
 )
 foreach ($section in $docSections) {
     $body = Get-DocSection $section.File $section.Start $section.End
@@ -819,5 +1064,5 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义/entry 端口/acceptance 指标与轻量预算一致；连接包 HKDF/AAD/密钥生命周期/向量脚本一致；图形入口字段为 reserved/optional，不阻塞 v1；文档数值可回溯契约，人工审计项已显式标注）" -ForegroundColor Green
+Write-Host "PASS: contract-check（版本 $contractVersion；CLI/日志/workflow/状态机/错误码/artifact manifest/link 服务端语义/entry 端口/acceptance 指标与轻量预算一致；连接包 HKDF/AAD/密钥生命周期/向量脚本一致；V1 仅浏览器 WebSocket 终端、SSH 与图形入口已移除；对外端口集合为 {443}；会话退出续编与分发边界、构建加速与协调节点红线一致；文档数值可回溯契约，人工审计项已显式标注）" -ForegroundColor Green
 exit 0

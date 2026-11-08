@@ -37,14 +37,13 @@ fn copy_contract(root: &Path, from: &str, to: &str) {
     std::fs::write(root.join(ENTRY_CONTRACT_PATH), replaced).expect("写入临时契约");
 }
 
-/// 直接从契约 JSON 取出三个端口，作为测试的期望值来源。
+/// 直接从契约 JSON 取出终端端口，作为测试的期望值来源。
 fn expected_ports() -> EntryPorts {
     let value: Value = serde_json::from_str(&contract_text()).expect("解析仓库入口契约");
-    let port = |key: &str| value["ports"][key].as_u64().expect("ports 字段必须是整数") as u16;
     EntryPorts {
-        terminal: port("terminal"),
-        graphical: port("graphical"),
-        vnc: port("vnc"),
+        terminal: value["ports"]["terminal"]
+            .as_u64()
+            .expect("ports.terminal 必须是整数") as u16,
     }
 }
 
@@ -77,13 +76,31 @@ fn loader_follows_rewritten_ports() {
     let ports = load_entry_ports(&root).expect("加载改写后的入口契约");
     assert_eq!(
         ports,
-        EntryPorts {
-            terminal: 17001,
-            graphical: 16080,
-            vnc: 15900,
-        },
+        EntryPorts { terminal: 17001 },
         "加载器必须读取契约值，不得写死端口"
     );
+    std::fs::remove_dir_all(&root).expect("清理临时目录");
+}
+
+#[test]
+fn graphical_ports_are_not_loaded() {
+    let root = temp_root("no-graphical");
+    let mut value: Value = serde_json::from_str(&contract_text()).expect("解析仓库入口契约");
+    value["ports"]
+        .as_object_mut()
+        .expect("ports 必须是对象")
+        .remove("graphical");
+    value["ports"]
+        .as_object_mut()
+        .expect("ports 必须是对象")
+        .remove("vnc");
+    std::fs::write(
+        root.join(ENTRY_CONTRACT_PATH),
+        serde_json::to_string(&value).expect("序列化临时契约"),
+    )
+    .expect("写入临时契约");
+    let ports = load_entry_ports(&root).expect("图形端口为 not-applicable，缺失不得阻塞终端加载");
+    assert_eq!(ports.terminal, expected_ports().terminal);
     std::fs::remove_dir_all(&root).expect("清理临时目录");
 }
 
@@ -98,12 +115,17 @@ fn wildcard_bind_is_rejected() {
 }
 
 #[test]
-fn graphical_entry_remains_reserved() {
+fn graphical_entry_is_not_supported() {
     let value: Value = serde_json::from_str(&contract_text()).expect("解析仓库入口契约");
     assert_eq!(
         value["graphical"]["status"].as_str(),
-        Some("reserved"),
-        "v1 图形入口必须保持 reserved"
+        Some("not-supported"),
+        "0.3.6 起 V1 图形入口必须为 not-supported"
+    );
+    assert_eq!(
+        value["v1GraphicalFallback"]["status"].as_str(),
+        Some("not-supported"),
+        "ssh -X 兜底随 SSH 入口移除，必须为 not-supported"
     );
     for key in [
         "ports.graphical",
@@ -114,8 +136,8 @@ fn graphical_entry_remains_reserved() {
     ] {
         assert_eq!(
             value["requiredness"][key].as_str(),
-            Some("reserved"),
-            "{key} 必须保持 reserved"
+            Some("not-applicable"),
+            "{key} 必须为 not-applicable"
         );
     }
     assert_eq!(

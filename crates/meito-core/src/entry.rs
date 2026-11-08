@@ -1,7 +1,8 @@
 //! File: 入口端口与回环绑定契约（contracts/entry.json）。
 //!
-//! 端口、回环地址与图形帧缓冲只从契约读取；代码不得另写数值。契约缺失或非法属于配置
-//! 错误，统一返回 `E_CONFIG`。
+//! V1 只有浏览器 WebSocket 终端入口；端口与回环地址只从契约读取，代码不得另写数值。
+//! 图形相关字段在契约 0.3.6 起为 `not-applicable`，实现不再读取。契约缺失或非法属于
+//! 配置错误，统一返回 `E_CONFIG`。
 
 use std::fs;
 use std::path::Path;
@@ -20,23 +21,19 @@ const LOOPBACK_ADDRESS: &str = "127.0.0.1";
 
 // ===== 数据结构 =====
 
-/// 入口监听端口；三个端口都必须只绑回环。
+/// 入口监听端口；只包含 V1 的终端入口，且必须只绑回环。
 ///
-/// `graphical` 与 `vnc` 是契约 0.3.3 起的 `reserved` 占位：v1 只加载数值，不启动图形链路，
-/// 也不得因状态为 `reserved` 就删除字段。
+/// 图形入口在契约 0.3.6 起为 `not-supported`，对应端口字段为 `not-applicable`，
+/// 因此实现不再加载 `graphical`/`vnc`，避免把不支持的入口带入运行时。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntryPorts {
     /// ttyd 终端入口端口。
     pub terminal: u16,
-    /// noVNC/websockify 图形入口端口；v1 预留，不监听。
-    pub graphical: u16,
-    /// x11vnc 的 VNC 端口；v1 预留，不监听。
-    pub vnc: u16,
 }
 
 // ===== 加载 =====
 
-/// 读取并校验入口契约，返回三个监听端口。
+/// 读取并校验入口契约，返回 V1 的终端监听端口。
 ///
 /// # 参数
 /// - `root`: 仓库根目录，契约必须位于 `root/contracts/entry.json`。
@@ -61,7 +58,7 @@ pub fn load_entry_ports(root: &Path) -> Result<EntryPorts, MeitoError> {
     parse_entry_ports(&value, &path.display().to_string())
 }
 
-/// 校验绑定属性与端口范围并构造结果。
+/// 校验绑定属性与终端端口范围并构造结果。
 ///
 /// # 参数
 /// - `value`: 已解析的契约 JSON。
@@ -92,8 +89,6 @@ fn parse_entry_ports(value: &Value, origin: &str) -> Result<EntryPorts, MeitoErr
         .ok_or_else(|| config_error(origin, "缺少 ports 对象"))?;
     Ok(EntryPorts {
         terminal: port(ports, "terminal", origin)?,
-        graphical: port(ports, "graphical", origin)?,
-        vnc: port(ports, "vnc", origin)?,
     })
 }
 

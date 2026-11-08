@@ -37,7 +37,7 @@ on:
         required: true
         default: terminal
         type: choice
-        options: [terminal, graphical, both]
+        options: [terminal]
       channel:
         description: "不透明通道 id（≤128，不含秘密）"
         required: true
@@ -51,7 +51,7 @@ on:
         required: true
         type: string
       flags:
-        description: "JSON：artifact_spec/meito_version/allowed_actors/share_mode/read_only/no_join_timeout_minutes/allow_graphical/checkpoint_minutes"
+        description: "JSON：artifact_spec/meito_version/allowed_actors/share_mode/read_only/no_join_timeout_minutes/checkpoint_minutes"
         required: true
         type: string
 

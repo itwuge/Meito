@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.5",
+  "contractVersion": "0.3.6",
   "purpose": "meito-link 协调服务的服务端语义：通道生命周期、令牌哈希、读取语义、限流、状态码映射与日志禁项",
   "channelId": {
     "opaque": true,
@@ -83,6 +83,66 @@
     "method_not_allowed": 405,
     "malformed": 400,
     "internal": 500
+  },
+  "deployment": {
+    "publicResources": {
+      "ipv4": "47.109.32.249",
+      "domain": "wuge.fun",
+      "icpRegistered": true
+    },
+    "hostnames": {
+      "apex": "wuge.fun",
+      "entry": "meito.wuge.fun",
+      "signaling": "meito.wuge.fun",
+      "stun": "meito.wuge.fun",
+      "staticPage": "meito.wuge.fun"
+    },
+    "ingress": {
+      "publicPorts": [443],
+      "publicPortSetIsSingleton443": true,
+      "transports": ["tcp", "udp"],
+      "reuse443For": ["entry-page", "signaling", "stun", "terminal-websocket", "control-api", "tls"],
+      "rawSshPortAllowed": false,
+      "additionalPorts": [],
+      "additionalPortsRegistration": "security-group+contract",
+      "newPortRequiresContractBump": true,
+      "newPortRequiresChangeLog": true,
+      "wildcardBind": false
+    },
+    "tls": {
+      "source": "acme",
+      "challenge": "dns-01",
+      "provider": "lets-encrypt",
+      "renewal": "automated",
+      "renewBeforeDays": 30,
+      "certPath": "/etc/meito/tls/fullchain.pem",
+      "keyPath": "/etc/meito/tls/privkey.pem",
+      "minimumVersion": "TLS1.2",
+      "alpn": ["h2", "http/1.1"]
+    },
+    "trafficBoundary": {
+      "coordinationOnly": true,
+      "carriesSessionTraffic": false,
+      "sessionTransport": "p2p-direct",
+      "allowedTraffic": ["signaling", "stun", "static-entry-page", "tls-handshake"],
+      "forbiddenTraffic": ["terminal-bytes", "ssh-bytes", "graphics-bytes", "file-transfer", "relay"],
+      "byteCounting": {
+        "method": "nftables-or-conntrack-counters",
+        "scope": "443/tcp+udp-on-coordination-node",
+        "window": "per-session",
+        "maxSessionBytesRef": "acceptance.json#coordination.coordinationSessionBytesMax",
+        "failOnExceed": "abort-session",
+        "excludeP2PDirectBytes": true,
+        "note": "协调节点侧只允许信令、STUN 与静态页字节；出现终端、SSH、图形或文件字节即视为中继并判失败"
+      }
+    },
+    "bandwidth": {
+      "redLineMbpsRef": "acceptance.json#coordination.coordinationBandwidthMbpsMax",
+      "appliesTo": ["signaling", "stun", "static-entry-page"],
+      "carriesBusinessTraffic": false,
+      "onExceed": ["degrade-graphics-quality", "switch-to-local"],
+      "expandForwardingForbidden": true
+    }
   },
   "logging": {
     "allowedFields": [

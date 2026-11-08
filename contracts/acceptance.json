@@ -1,6 +1,6 @@
 {
-  "contractVersion": "0.3.5",
-  "purpose": "SC-01 一类验收指标与轻量性预算的单一来源；验收脚本必须引用 metrics/lightweight，不得在文档或脚本里另写数值。图形入口相关指标为 optional，不阻塞 v1 验收",
+  "contractVersion": "0.3.6",
+  "purpose": "SC-01 一类验收指标、轻量性预算、构建加速与协调节点红线的单一来源；验收脚本必须引用 metrics/lightweight/buildSpeed/coordination，不得在文档或脚本里另写数值。V1 不做图形入口，相关指标标为 not-applicable",
   "requiredness": {
     "sc01ColdStartP95Seconds": "required",
     "sc01Samples": "required",
@@ -9,7 +9,7 @@
     "sc05TransferRepeats": "required",
     "sc05ServerOverheadPercentMax": "required",
     "sc07UnauthorizedStatuses": "required",
-    "sc07VncPasswordOnlyMustFail": "optional",
+    "sc07VncPasswordOnlyMustFail": "not-applicable",
     "sc08MaxOverrunSeconds": "required",
     "sc08IdleStopGraceMinutes": "required",
     "sc08DownStopGraceSeconds": "required",
@@ -23,12 +23,18 @@
     "directDependencyCountMax": "pending-calibration",
     "runnerResidentProcessCountMax": "required",
     "runnerNewPackageCountMax": "required",
-    "graphicalComponentCountMax": "required"
+    "graphicalComponentCountMax": "required",
+    "ccacheHitRateMinPercent": "pending-calibration",
+    "warmBuildDurationRatioMax": "pending-calibration",
+    "coordinationBandwidthMbpsMax": "required",
+    "coordinationCarriesSessionTraffic": "required",
+    "coordinationSessionBytesMax": "pending-calibration"
   },
   "graphical": {
-    "status": "reserved",
-    "reason": "图形入口渲染方案待定；与图形入口相关的指标不阻塞 v1 验收",
-    "optionalMetrics": ["sc07VncPasswordOnlyMustFail"]
+    "status": "not-supported",
+    "v1Enabled": false,
+    "reason": "V1 明确不做图形入口；ssh -X 兜底随 SSH 入口移除失效；浏览器内 VNC 复用 443 WebSocket 仅作后续候选留档",
+    "notApplicableMetrics": ["sc07VncPasswordOnlyMustFail"]
   },
   "metrics": {
     "sc01ColdStartP95Seconds": 180,
@@ -44,6 +50,56 @@
     "sc08DownStopGraceSeconds": 60,
     "sc13DefconfigRuns": 2,
     "sc15FirstRunMinutes": 15
+  },
+  "buildSpeed": {
+    "status": "pending-calibration",
+    "purpose": "只验收第二次及以后的缓存命中场景；不承诺冷构建加速",
+    "scope": "second-and-later-run-with-warm-cache",
+    "coldBuildSpeedupPromise": false,
+    "metrics": {
+      "ccacheHitRateMinPercent": "pending-calibration",
+      "warmBuildDurationRatioMax": "pending-calibration",
+      "dlCacheReuseRequired": true,
+      "buildDirIncrementRequired": true,
+      "parallelJobsFollowsCpuCores": true
+    },
+    "pendingCalibration": {
+      "ccacheHitRateMinPercent": {
+        "neededMeasurement": "在同一 revision 的第二次及以后构建上执行 `ccache -s`，统计 cache hit rate（direct + preprocessed）除以 requests 的百分比；先跑 3 次取最小值",
+        "calibratedBy": "M5"
+      },
+      "warmBuildDurationRatioMax": {
+        "neededMeasurement": "同一 revision 连续构建：第一次冷构建墙钟记为基线，第二次及以后取墙钟与基线比值的最大值；无冷构建基线时该项不判",
+        "calibratedBy": "M5"
+      }
+    },
+    "methods": {
+      "ccacheHitRateMinPercent": "构建前后各执行一次 `ccache -s`，用 `ccache -s` 输出的 cache hit (direct/preprocessed) 与 requests 计算百分比；窗口为单次构建，取 3 次最小值",
+      "warmBuildDurationRatioMax": "记录第一次冷构建墙钟 T1，第二次及以后同一 revision 的墙钟 Tn，取 max(Tn/T1)；构建目录、`openwrt/dl` 与 ccache 必须在两次之间保留"
+    }
+  },
+  "coordination": {
+    "status": "required",
+    "purpose": "协调节点只做信令、STUN 与静态入口页；不承载会话业务流量",
+    "metrics": {
+      "coordinationBandwidthMbpsMax": 3,
+      "coordinationCarriesSessionTraffic": false,
+      "coordinationSessionBytesMax": "pending-calibration"
+    },
+    "pendingCalibration": {
+      "coordinationSessionBytesMax": {
+        "neededMeasurement": "在 10 次典型会话（仅信令、STUN、静态页）上采集协调节点 443/tcp+udp 的 nftables/conntrack 字节计数，取会话窗口内差值最大值；只统计协调节点，不含 P2P 直连字节",
+        "calibratedBy": "M5"
+      }
+    },
+    "methods": {
+      "coordinationBandwidthMbpsMax": "在协调节点对 443/tcp+udp 采样 5 分钟，取 ingress/egress 速率的 95 分位，必须 ≤ 3 Mbps",
+      "coordinationSessionBytesMax": "会话前后各读一次 nftables/conntrack 计数，取 443 端口字节差值；终端、SSH、图形与文件传输字节不得出现在该计数中",
+      "coordinationCarriesSessionTraffic": "同一会话分别在节点侧与 runner 侧计数：节点侧只应有信令、STUN 与静态页字节；出现业务字节即判失败"
+    },
+    "onBandwidthExceeded": ["degrade-graphics-quality", "switch-to-local"],
+    "relayForbidden": true,
+    "note": "3 Mbps 红线只约束协调节点自身的信令/STUN/静态页；带宽不足时降级画质或转本地版，不得把业务流量改为经节点转发"
   },
   "lightweight": {
     "status": "required",

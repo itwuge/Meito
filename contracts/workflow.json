@@ -1,7 +1,44 @@
 {
-  "contractVersion": "0.3.5",
+  "contractVersion": "0.3.6",
   "template": "templates/meito-session.yml",
   "trigger": "workflow_dispatch",
+  "triggerPolicy": {
+    "workflowDispatch": true,
+    "keywordWebhook": {
+      "enabled": true,
+      "keyword": "meito",
+      "matchMode": "comment-body-contains",
+      "unauthorizedActor": "reject",
+      "authorizationSource": "flags.allowed_actors",
+      "failClosed": true,
+      "unauthorizedErrorCode": "E_ACTOR_NOT_ALLOWED",
+      "keywordMiss": "ignore",
+      "auditEvent": "authz_denied"
+    }
+  },
+  "accessModes": {
+    "v1Primary": "browser-websocket",
+    "browserTerminal": true,
+    "ssh": "removed",
+    "sshRemovalReason": "V1 不提供 SSH 入口；浏览器 WebSocket 终端已覆盖 TUI 与 menuconfig，移除可避免额外认证面、裸端口与 ssh -X 兜底"
+  },
+  "terminalCapability": {
+    "mode": "browser-websocket",
+    "implementation": "ttyd",
+    "tuiSupport": "full",
+    "menuconfigSupported": true,
+    "readOnlyToken": true,
+    "writeToken": true,
+    "publicPort": 443
+  },
+  "fileTransfer": {
+    "method": "artifact+local-pull-apply",
+    "onlyPath": true,
+    "scp": false,
+    "sshDependent": false,
+    "artifactContract": "contracts/artifact-manifest.schema.json",
+    "localCommand": "meito pull --apply"
+  },
   "permissions": {
     "contents": "read",
     "actions": "read"
@@ -17,11 +54,11 @@
     { "name": "max_minutes", "type": "string", "required": true, "default": "60", "min": 1, "max": 300 },
     { "name": "idle_minutes", "type": "string", "required": true, "default": "10", "min": 1, "max": 300 },
     { "name": "p2p_provider", "type": "enum", "required": true, "default": "frp_xtcp", "enum": ["frp_xtcp", "tailscale_direct"] },
-    { "name": "entry", "type": "enum", "required": true, "default": "terminal", "enum": ["terminal", "graphical", "both"] },
+    { "name": "entry", "type": "enum", "required": true, "default": "terminal", "enum": ["terminal"] },
     { "name": "channel", "type": "string", "required": true, "maxLength": 128, "description": "不透明通道 id；不得包含 write_token 或 public_key" },
     { "name": "channel_write_token", "type": "string", "required": true, "maxLength": 128, "description": "一次性写 token；过期即失效" },
     { "name": "channel_public_key", "type": "string", "required": true, "maxLength": 64, "description": "本地临时 X25519 公钥，base64url 无填充" },
-    { "name": "flags", "type": "json", "required": true, "maxLength": 1000, "fields": ["artifact_spec", "meito_version", "allowed_actors", "share_mode", "read_only", "no_join_timeout_minutes", "allow_graphical", "checkpoint_minutes"] }
+    { "name": "flags", "type": "json", "required": true, "maxLength": 1000, "fields": ["artifact_spec", "meito_version", "allowed_actors", "share_mode", "read_only", "no_join_timeout_minutes", "checkpoint_minutes"] }
   ],
   "outputs": {
     "connectionPackage": {
@@ -54,6 +91,61 @@
       "schema": "contracts/artifact-manifest.schema.json",
       "checksum": "sha256"
     }
+  },
+  "connectionDelivery": {
+    "mode": "one-time-encrypted-channel",
+    "transport": "meito-link",
+    "contract": "contracts/connection-package.json",
+    "oneTime": true,
+    "redelivery": "denied",
+    "inLog": false,
+    "inArtifact": false,
+    "inJobSummary": false,
+    "localDisplay": "local-cli-only",
+    "jobSummary": {
+      "content": "status-and-presence-flags-only",
+      "readyStatus": "ready"
+    }
+  },
+  "sessionLifecycle": {
+    "processModel": "build-parent-session-child",
+    "sessionProcess": "child",
+    "buildOrchestrator": "parent",
+    "buildStartsWhen": "session-exit",
+    "requiresSecondUserAction": false,
+    "exitEvents": ["ctrl-d", "exit-command", "process-exit"],
+    "onExitCodeZero": "continue-build",
+    "onExitCodeNonZero": "abort-build-and-fail-job",
+    "nonZeroErrorCode": "E_ENTRY",
+    "silentContinue": false,
+    "buildFailure": "fail-job-with-build-exit-code"
+  },
+  "failureUx": {
+    "webTerminal": {
+      "blackScreenSelfRescue": false,
+      "ctrlCSelfRescue": false,
+      "showExplicitError": true,
+      "actions": ["show-error-code", "show-reason", "switch-to-local"],
+      "switchToLocal": "one-click",
+      "switchTarget": "local-cli",
+      "errorMustNotContainConnectionString": true
+    }
+  },
+  "buildCache": {
+    "ccache": {
+      "persist": true,
+      "scope": "repository",
+      "key": "repo+ref"
+    },
+    "dlCache": {
+      "persist": true,
+      "path": "openwrt/dl"
+    },
+    "buildDirIncremental": true,
+    "parallelism": "job-count-equals-cpu-cores",
+    "coldBuildSpeedupPromise": false,
+    "measuredScenario": "second-and-later-run",
+    "metricsContract": "contracts/acceptance.json#buildSpeed"
   },
   "artifactGuard": {
     "pathWhitelist": ["*.config", "*.defconfig", "*.diff", "*.patch", "*.json", "*.log", "*.txt"],

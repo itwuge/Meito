@@ -91,10 +91,10 @@ Meito 要在 GitHub 托管 runner 上获得一个可交互会话，用于 `make 
 | SC-01 | 冷启动到入口可用 ≤ 180 s（p95），10 次采样 | 记录 dispatch 时间、入口 HTTP 健康检查时间；报告 p50/p95 | 未验证 |
 | SC-02 | `make menuconfig` 可交互并保存 `.config` | 在 ttyd 中执行，方向键移动、保存、退出；对比 runner 与本地 `.config` 的 SHA256 | 未验证 |
 | SC-03 | `meito pull` 带回 `.config` 与 `defconfig` | manifest 中 SHA256 与本地文件一致；`git diff` 只包含预期文件 | 未验证 |
-| SC-04 | 未授权密钥无法接入 | 用另一把 SSH 私钥连接，10 s 内返回 `Permission denied (publickey)`；无 shell | 未验证 |
+| SC-04 | 未授权 token/actor 无法接入 | 用未登记 actor 的 token 请求浏览器 WebSocket 终端，10 s 内返回 401/403；无 PTY 分配 | 未验证 |
 | SC-05 | 服务器不承载会话字节 | 100 MB 传输 3 次；服务器协调端口字节增量 < 5% 负载，且服务器抓包无数据流（见 9.4） | 未验证 |
-| SC-06 | 入口只绑回环 | runner 上 `ss -ltnp` 中 7681/5900/6080 只出现 `127.0.0.1`；无 `0.0.0.0` | 未验证 |
-| SC-07 | 图形入口 token 有效、VNC 密码不作为主鉴权 | 无 token 请求返回 401/403；仅持 VNC 8 位密码无法进入；token 正确后可操作 | 未验证 |
+| SC-06 | 入口只绑回环 | runner 上 `ss -ltnp` 中终端回环端口只出现 `127.0.0.1`；V1 不监听预留图形端口；无 `0.0.0.0` | 未验证 |
+| SC-07 | 终端入口 token 有效 | 无 token 请求返回 401/403；token 正确后可操作。VNC 密码项 V1 不适用（图形入口整体不做） | 未验证 |
 | SC-08 | 会话按时收尾 | `max_minutes` 到达后 ±60 s 内 job 结束；空闲 `idle_minutes` 后 ≤5 min 内结束；`meito down` 后 ≤60 s 取消/结束 | 未验证 |
 | SC-09 | 无孤儿会话 | 收尾后 `gh run list` 中无该 workflow 的 active/queued 运行；`meito clean --orphans` 可清理人为制造的孤儿 | 未验证 |
 | SC-10 | 日志链路完整 | 每次会话本地与 runner 都有同一 `session_id` 的日志；失败含错误码、阶段、证据路径 | 未验证 |
@@ -649,6 +649,28 @@ meito clean --orphans --dry-run
 - 清零依赖 `zeroize` crate，属尽力而为：仅覆盖本进程持有的缓冲区，且依赖编译器不优化掉清零。**不声称**可抵御内存取证、交换分区、核心转储或冷启动攻击。
 - 固定测试向量：生成脚本 `scripts/gen-connection-package-vector.py`（依赖 PyNaCl==1.6.2），命令 `python scripts/gen-connection-package-vector.py`；输入全部固定（RFC 7748 §6.1 Alice/Bob 私钥、nonce `00..17`、固定 JSON 明文），无系统随机源。实现改为 HKDF 后必须用该脚本重新生成向量，连续两次输出逐字节一致。
 
+### 5.12 会话退出、续编与终端能力
+
+目标流程的契约字段在 `contracts/workflow.json`：`triggerPolicy`、`accessModes`、`terminalCapability`、`fileTransfer`、`connectionDelivery`、`sessionLifecycle`、`failureUx`、`buildCache`。
+
+- 触发：保留 `workflow_dispatch`；关键词 webhook 只匹配 `meito`，非授权 actor 按 `E_ACTOR_NOT_ALLOWED` fail-closed 拒绝，关键词不匹配则忽略。
+- 入口：V1 **唯一**用户入口是浏览器 WebSocket 终端（ttyd 形态），完整支持 TUI 与 `make menuconfig`，保留只读/可写两种 token。SSH 入口整体移除（契约 `accessModes.ssh="removed"`），`disabled`/`tls-tunnel` 等占位不保留；图形入口 V1 同样不做。
+- 连接信息分发：只经 `meito-link` 加密通道一次性下发到本地 CLI，`oneTime=true`、禁止重复投递；不进日志、不进 artifact、不进 Job Summary。Job Summary 只显示 `status=ready` 与存在性标记。
+- 会话与编译：会话进程是构建编排进程的**子进程**。用户按 Ctrl+D 或输入 `exit` 使会话退出后，父进程自动继续编译，不需要第二次点击。只有退出码为 0 才续编；非 0 立即中止编译并以 `E_ENTRY`（退出码 7）失败，禁止静默继续。编译本身的非 0 退出码即 job 失败。
+- 文件回传：唯一路径是 artifact + 本地 `meito pull --apply`，不依赖 `scp`/SSH；契约 `fileTransfer.onlyPath=true`。
+- 网页终端失败体验：不做「黑屏按 Ctrl+C」自救；显示错误码与原因，并提供一键转本地版；错误信息不得包含连接串。
+- 构建加速：ccache 持久化、`openwrt/dl` 保留、构建目录增量复用、`make -j$(nproc)` 跟随核数。**不承诺冷构建加速**；验收只针对第二次及以后的命中场景，指标见 `acceptance.json#buildSpeed`（`ccacheHitRateMinPercent`、`warmBuildDurationRatioMax`，均为 `pending-calibration`）。
+
+### 5.13 协调节点部署、端口与流量边界
+
+协调节点部署字段在 `contracts/link.json#deployment`，验收红线在 `contracts/acceptance.json#coordination`。
+
+- 公网资源：`47.109.32.249` + 域名 `wuge.fun`（已备案）。入口、信令、STUN 与静态入口页统一使用子域 `meito.wuge.fun`。
+- 对外端口集合固定为 `{443}`，同时声明 tcp/udp；入口页、信令/STUN、终端 WebSocket、控制 API 全部复用 443。任何新增对外端口必须升契约版本并在变更记录说明；禁止裸 SSH 端口、额外端口与通配绑定。
+- TLS：ACME DNS-01（Let's Encrypt），自动续期，提前 30 天；最低 TLS1.2。部署值与续期机制**未实测**。
+- 流量边界：协调节点只做打洞、信令、STUN 与静态页；终端数据属 P2P 直连，协调节点不承载会话流量。节点侧用 nftables/conntrack 对 443/tcp+udp 计数，`byteCounting.maxSessionBytesRef` 指向验收项；出现终端、图形或文件字节即视为中继并判失败。
+- 带宽红线 3 Mbps 只约束信令/STUN/静态页；与「不转发业务流量」绑定为验收项。带宽不足或 P2P 失败时只能降级画质或转本地版，**不得扩容转发**。
+
 ---
 
 ## 6. 产物回传
@@ -837,7 +859,7 @@ frp xtcp 打洞
 1. **配置审计**：解析 frpc/frps 配置，确认没有 `stcp`、没有 `fallbackTo`；Tailscale 确认 DERP map 为空、无 peer relay。审计结果写入会话日志。
 2. **服务器侧字节计数**：
    - 在服务器上对 frps 控制端口与协调端口加独立计数（`iptables`/`nft` 计数器或 `/sys/class/net/*/statistics` 前后差值）。
-   - 先测空闲 60 s 的基线；再让本地与 runner 之间传输 100 MB（`dd`/`scp` 经 SSH），重复 3 次。
+   - 先测空闲 60 s 的基线；再让本地与 runner 之间经 P2P 直连通道传输 100 MB（不使用 `scp`/SSH 隧道），重复 3 次。
    - 判据：服务器对应端口/接口的字节增量 < 5% × 100 MB，且抓包中不出现持续的大包数据流；控制流量只应是心跳/协调量级。
    - 同时记录本地发送量、runner 接收量，三者对照。
 3. **服务器抓包**：在服务器协调接口上 `tcpdump` 过滤 peer 地址与端口；传输期间只应看到控制/协调包；若出现与 payload 成比例的数据包，判定失败。
@@ -932,23 +954,14 @@ ttyd -W -i 127.0.0.1 -p 7681 -m 1 -O -T xterm-256color \
 - menuconfig 的 TUI 依赖 PTY 与 xterm.js 兼容性；**未验证**，M4 用真实 menuconfig 做冒烟。
 - 端口、绑定地址与 `-W`/`-m 1`/`-O` 取自 `contracts/entry.json`，本文不另写数值。
 
-### 10.4 图形入口（noVNC 栈：P2 可选预留）
+### 10.4 图形入口（V1 明确不做）
 
-v1 不启动本栈，以下配置作为 P2 预留保留；v1 本地版图形兜底走 SSH X11 转发，网页版候选与取舍见 §10.8。
+V1 不提供图形入口，也不启动 X/VNC/websockify 任何一层；`v1GraphicalFallback` 随 SSH 入口移除一并失效（`ssh -X` 兜底不再存在），契约字段标记为 `not-supported`，不保留半截可用路线。
 
-```text
-Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
-DISPLAY=:99 openbox &
-DISPLAY=:99 x11vnc -localhost -rfbport 5900 -rfbauth ~/.vnc/passwd -safer &
-websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 &
-```
-
-- 所有监听都在 `127.0.0.1`；VNC 与 websockify 都不暴露公网。
-- noVNC 的 VNC 密码是 8 位 DES，**不能作为主鉴权**；`x11vnc` 的 `-rfbauth` 只作纵深。
-- 主鉴权：隧道侧一次性 token + SSH 密钥/WebRTC 信令鉴权 + actor 白名单。
-- 禁止 `0.0.0.0:6080`、禁止公网直连、禁止任何隧道中继；`ss -ltnp` 是验收项。
-- 图形入口用于必须鼠标操作的配置工具；普通 menuconfig 优先 terminal。
-- 端口 5900/6080、帧缓冲 1280x800x24 与 VNC 密码 8 位取自 `contracts/entry.json`，本文不另写数值；这些字段在 0.3.3 起标记为 `reserved`，保留预留位但不阻塞 v1 验收。
+- 普通 menuconfig 全程使用浏览器 WebSocket 终端（ttyd 形态），完整 TUI 能力见 §5.12。
+- 后续若重启图形入口，唯一候选是「浏览器内 VNC 复用 443 WebSocket」，KasmVNC 首选、noVNC 兜底；取舍与未验证项见 §10.8。
+- 端口 5900/6080、帧缓冲 1280x800x24 与 VNC 密码 8 位仍保留在 `contracts/entry.json` 作为后续候选字段，但 `requiredness` 为 `not-applicable`，V1 不启动、不验收。
+- V1 运行期若发现 5900/6080 被监听，视为越界并判失败；所有监听仍只允许 `127.0.0.1`。
 
 ### 10.5 带宽与 CPU 代价（人工审计：估算，未实测）
 
@@ -984,11 +997,11 @@ websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 &
 
 1. 网页版图形入口首选 KasmVNC：单包集成 X/VNC/Web 客户端，组件数量与维护成本最低。
 2. 前提风险：KasmVNC 偏离标准 RFB、只能使用其自带 Web 客户端，能否接入我们的 WebRTC DataChannel 传输**未验证**；若桥接成本不可接受，退回 noVNC（传输层可替换，但不得依赖 KasmVNC 的 RFB 扩展）。
-3. xpra 不作首选；`ssh -X` 仅限本地版 P2（需要本机 X server，Windows 侧依赖 X server 或 WSLg）。
+3. xpra 不作首选；`ssh -X` 已随 V1 SSH 入口移除一并删除，不再作为任何版本的兜底。
 4. 带宽归属：协调节点仅承载信令与 STUN（单会话量级 kbps），画面字节全部压在 runner 出方向；带宽不足时调画质参数（分辨率/帧率/编码质量），不得扩容协调节点或引入中继。
 5. 安装耗时、码率、IME 表现均**未实测**；M6 用 `nload`/`pidstat` 与真实输入法验证。若 KasmVNC 自带客户端无法经 DataChannel 桥接，则回退 noVNC，此时以 `contracts/entry.json` 中预留的端口与帧缓冲为准。
 
-本地版 v1 兜底：`ssh -X` 转发单个图形程序（如 `menuconfig` 的图形前端或必须鼠标的配置工具），不启动 runner 侧 X 栈；网页版 v1 不开图形入口。
+V1 图形结论落地：**两端都不开图形入口**。本地版不再用 `ssh -X`，网页版不启动 VNC 栈；上述 KasmVNC/noVNC 内容仅作为后续候选留档，不构成 V1 可用路线。
 
 ### 10.9 轻量性预算与测法（v1）
 

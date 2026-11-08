@@ -1,10 +1,16 @@
 {
-  "contractVersion": "0.3.5",
+  "contractVersion": "0.3.6",
   "status": "frozen",
   "frozenAt": "2026-11-08",
   "project": "meito",
-  "supersedes": "0.3.4",
+  "supersedes": "0.3.5",
   "revisions": [
+    {
+      "version": "0.3.6",
+      "date": "2026-11-08",
+      "reason": "目标体验与入口收敛：会话退出后自动续编、一次性连接信息分发边界、关键词 webhook 与 actor 拒绝、网页终端失败体验、构建缓存指标；对外端口收敛为 {443}；V1 移除 SSH 与图形入口，配置回传唯一走 artifact + 本地 pull --apply；协调节点只做打洞/信令/STUN/静态页",
+      "impact": ["workflow.json", "entry.json", "acceptance.json", "link.json", "docs/design.md §2/§5.12/§5.13/§10.4/§10.5/§10.8", "docs/接口冻结.md §5.8", "scripts/contract-check.ps1"]
+    },
     {
       "version": "0.3.5",
       "date": "2026-11-08",

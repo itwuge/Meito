@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ===== Meito runner 远端脚本：启动会话 =====
 # 用途：校验会话参数后启动 meito-runner 的 session 子命令；同一 session id 只允许一个活动实例（原子目录锁）。
-# 输入：workflow 输入（GITHUB_EVENT_PATH.inputs 或 MEITO_INPUT_*）；contracts/workflow.json 的上限；contracts/entry.json 的图形预留状态；tools.lock.json 的 meito-runner pinned 条目；MEITO_RUNNER_BIN（可选显式路径）。
+# 输入：workflow 输入（GITHUB_EVENT_PATH.inputs 或 MEITO_INPUT_*）；contracts/workflow.json 的上限与 entry 枚举（V1 只有 terminal）；tools.lock.json 的 meito-runner pinned 条目；MEITO_RUNNER_BIN（可选显式路径）。
 # 输出：logs/session-<id>.jsonl 追加 session.* 事件；日志与成果路径由 runner 按契约写入；不打印 token。
-# 退出码：0 runner 成功；2 E_USAGE（重复启动/参数非法）；4 E_BOOTSTRAP（runner 未就绪）；7 E_ENTRY（图形入口未获许可）；其余按 contracts/error-codes.json 透传 runner 退出码；1 E_INTERNAL。
+# 退出码：0 runner 成功；2 E_USAGE（重复启动/参数非法）；4 E_BOOTSTRAP（runner 未就绪）；其余按 contracts/error-codes.json 透传 runner 退出码（含 7 E_ENTRY）；1 E_INTERNAL。
 # 契约：contracts/workflow.json、contracts/entry.json、contracts/tools-lock.schema.json、contracts/error-codes.json、contracts/log.json。
 # 未实测：meito-runner 的 session 子命令在本仓库尚未实现（M4 补齐）；未在 GitHub Actions ubuntu-latest 实跑；本地仅验证参数与锁分支，见 docs/变更记录.md。
 
@@ -21,7 +21,6 @@ meito_require_session "$SESSION"
 
 EXIT_USAGE=$(meito_error_exit E_USAGE)
 EXIT_BOOTSTRAP=$(meito_error_exit E_BOOTSTRAP)
-EXIT_ENTRY=$(meito_error_exit E_ENTRY)
 EXIT_INTERNAL=$(meito_error_exit E_INTERNAL)
 
 # ===== 1. 参数上限来自契约 =====
@@ -39,17 +38,9 @@ fi
 
 ENTRY=$(meito_input entry "terminal")
 case "$ENTRY" in
-  terminal|graphical|both) : ;;
-  *) meito_fail preflight session.invalid_entry E_USAGE "$EXIT_USAGE" "entry 不在契约枚举内" ;;
+  terminal) : ;;
+  *) meito_fail preflight session.invalid_entry E_USAGE "$EXIT_USAGE" "entry 不在契约枚举内（V1 只有 terminal）" ;;
 esac
-
-if [[ "$ENTRY" != "terminal" ]]; then
-  ALLOW_GRAPHICAL=$(meito_flag allow_graphical "false")
-  GRAPHICAL_STATUS=$(meito_json_get "$MEITO_CONTRACTS_DIR/entry.json" graphical.status)
-  if [[ "$ALLOW_GRAPHICAL" != "true" || "$GRAPHICAL_STATUS" != "reserved" ]]; then
-    meito_fail failed_entry entry.refused E_ENTRY "$EXIT_ENTRY" "图形入口在 v1 为 reserved，且未显式 allow_graphical=true" "entry=$ENTRY"
-  fi
-fi
 
 P2P=$(meito_input p2p_provider "frp_xtcp")
 case "$P2P" in

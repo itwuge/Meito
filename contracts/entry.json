@@ -1,6 +1,6 @@
 {
-  "contractVersion": "0.3.5",
-  "purpose": "入口监听端口与回环绑定约束；代码、脚本与文档必须从这里读取，不得另写数值。终端入口与回环绑定是 v1 强制项，图形入口为 P2 可选预留",
+  "contractVersion": "0.3.6",
+  "purpose": "入口监听端口与回环绑定约束；代码、脚本与文档必须从这里读取，不得另写数值。V1 用户入口只有浏览器 WebSocket 终端（ttyd 形态），SSH 入口与图形入口均不支持",
   "requiredness": {
     "bind.address": "required",
     "bind.loopbackOnly": "required",
@@ -9,11 +9,11 @@
     "terminal.writeFlag": "required",
     "terminal.singleClientFlag": "required",
     "terminal.originCheckFlag": "required",
-    "ports.graphical": "reserved",
-    "ports.vnc": "reserved",
-    "graphical.framebuffer": "reserved",
-    "graphical.vncPasswordChars": "reserved",
-    "graphical.vncPasswordDesOnly": "reserved"
+    "ports.graphical": "not-applicable",
+    "ports.vnc": "not-applicable",
+    "graphical.framebuffer": "not-applicable",
+    "graphical.vncPasswordChars": "not-applicable",
+    "graphical.vncPasswordDesOnly": "not-applicable"
   },
   "bind": {
     "address": "127.0.0.1",
@@ -28,14 +28,21 @@
   },
   "terminal": {
     "implementation": "ttyd",
+    "webSocket": true,
+    "publicPort": 443,
+    "tuiSupport": "full",
+    "menuconfigSupported": true,
     "writeFlag": "-W",
     "singleClientFlag": "-m 1",
     "originCheckFlag": "-O"
   },
   "graphical": {
-    "status": "reserved",
-    "reason": "渲染方案待定；v1 本地版用 SSH X11 转发兜底，网页版候选 KasmVNC 或 xpra，二选一待对比结论",
-    "implementation": "Xvfb + x11vnc + websockify + noVNC",
+    "status": "not-supported",
+    "v1Enabled": false,
+    "reason": "V1 明确不做图形入口；ssh -X 随 SSH 入口移除一并失效；浏览器内 VNC 复用 443 WebSocket 仅作为后续候选留档，不在 V1 落地",
+    "implementation": "deferred",
+    "futureTransport": "browser-vnc-over-443-websocket",
+    "futureCandidates": ["KasmVNC", "noVNC"],
     "framebuffer": {
       "width": 1280,
       "height": 800,
@@ -45,11 +52,12 @@
     "vncPasswordDesOnly": true
   },
   "v1GraphicalFallback": {
-    "status": "required",
-    "transport": "ssh-x11-forwarding",
-    "sshFlag": "-X",
-    "localXServer": true,
-    "webCandidates": ["KasmVNC", "noVNC", "xpra"],
+    "status": "not-supported",
+    "v1Enabled": false,
+    "removed": ["ssh-x11-forwarding"],
+    "removalReason": "V1 不提供 SSH 入口，ssh -X 兜底随之失效；不保留半截图形路线",
+    "futureCandidate": "browser-vnc-over-443-websocket",
+    "futureCandidates": ["KasmVNC", "noVNC"],
     "webDecision": "kasmvnc-preferred-novnc-fallback"
   }
 }
