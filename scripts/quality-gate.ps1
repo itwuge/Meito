@@ -6,6 +6,16 @@ $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+    Write-Host "FAIL: CARGO_TARGET_DIR 未设置；构建产物不得落仓库内 target/，拒绝回退默认路径。" -ForegroundColor Red
+    exit 126
+}
+if (-not [System.IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
+    Write-Host "FAIL: CARGO_TARGET_DIR 必须是绝对路径，当前为 '$env:CARGO_TARGET_DIR'。" -ForegroundColor Red
+    exit 126
+}
+Write-Host "使用 CARGO_TARGET_DIR：$env:CARGO_TARGET_DIR"
+
 function Run-Command {
     param(
         [string]$Name,
@@ -49,6 +59,7 @@ if (Test-Path -LiteralPath (Join-Path $root "Cargo.toml")) {
 }
 
 Run-Command "arch-check.ps1" $ps @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $root "scripts\arch-check.ps1"))
+Run-Command "target-cleanup.ps1" $ps @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $root "scripts\target-cleanup.ps1"))
 
 Write-Host "PASS: quality-gate 完成" -ForegroundColor Green
 exit 0

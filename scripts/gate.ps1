@@ -177,6 +177,9 @@ function New-DefaultConfig {
             defaultTargetDir = "target"
             minFreeGB = 10
             checkSystemDrive = $true
+            requireEnv = $true
+            forbidRepoLocalTarget = $true
+            checkSharedWorktrees = $false
         }
         logging = @{
             allowedPrintGlobs = @("**/examples/**", "**/benches/**", "**/tests/**", "**/build.rs")
@@ -669,39 +672,79 @@ function Invoke-Rule-VersionConsistency {
 
 # =====** R-C-15 build location =====**
 
+function Get-BuildFileCount {
+    param([string]$Directory)
+    if (-not (Test-Path -LiteralPath $Directory)) { return 0 }
+    return @(Get-ChildItem -LiteralPath $Directory -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "CACHEDIR.TAG" }).Count
+}
+
 function Invoke-Rule-BuildLocation {
     if (-not (Test-RuleEnabled "build_location")) { return }
     $ruleId = Get-RuleId "build_location"
+    $envName = [string]$script:Config.build.targetDirEnv
+    $requireEnv = $script:Config.build.requireEnv -eq $true
     $target = $TargetDir
     if ($script:SelfTestMode -and $script:SelfTestTargetDir -ne "") { $target = $script:SelfTestTargetDir }
+    if ($target -eq "" -and $envName -ne "" -and (Test-Path Env:$envName)) { $target = [string](Get-Item Env:$envName).Value }
     if ($target -eq "") {
-        $envName = [string]$script:Config.build.targetDirEnv
-        if ($envName -ne "" -and (Test-Path Env:$envName)) { $target = [string](Get-Item Env:$envName).Value }
+        if ($requireEnv -and $envName -ne "") {
+            Add-Violation $ruleId ([string]$script:Config.version.cargoManifest) 0 ("R-C-15 " + $envName + " is not set; refusing to fall back to a repo-local target dir.")
+        } else {
+            $target = Join-Path $script:RootFull ([string]$script:Config.build.defaultTargetDir)
+        }
+        if ($target -eq "") { return }
     }
-    if ($target -eq "") { $target = Join-Path $script:RootFull ([string]$script:Config.build.defaultTargetDir) }
-    if (-not [System.IO.Path]::IsPathRooted($target)) { $target = Join-Path $script:RootFull $target }
+    if (-not [System.IO.Path]::IsPathRooted($target)) {
+        Add-Violation $ruleId ([string]$script:Config.version.cargoManifest) 0 ("R-C-15 build target must be an absolute path; got '" + $target + "'.")
+        return
+    }
     $targetFull = [System.IO.Path]::GetFullPath($target)
     $targetRoot = [System.IO.Path]::GetPathRoot($targetFull)
     $systemRoot = [System.IO.Path]::GetPathRoot($script:RootFull)
     if ($null -ne $env:SystemDrive -and $env:SystemDrive -ne "") { $systemRoot = $env:SystemDrive + "\" }
 
-    if ($script:Config.build.checkSystemDrive -ne $false -and $targetRoot -ne "" -and $targetRoot.ToLowerInvariant() -eq $systemRoot.ToLowerInvariant()) {
-        Add-Violation $ruleId ($targetFull.Replace("\", "/")) 0 ("R-C-15 build target is on system drive " + $systemRoot + "; set " + $script:Config.build.targetDirEnv + " to another drive.")
+    $repoBoundary = $script:RootFull.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if ($targetFull.StartsWith($repoBoundary, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Add-Violation $ruleId ($targetFull.Replace("\", "/")) 0 ("R-C-15 build target is inside the repository; set " + $envName + " outside the source tree.")
     }
 
-    if ($Build -or $script:SelfTestBuild) {
-        $minGb = $MinFreeGB
-        if ($minGb -lt 0) { $minGb = [int]$script:Config.build.minFreeGB }
-        $driveName = $targetRoot.TrimEnd('\', '/')
-        if ($driveName -ne "" -and $driveName.Length -eq 2 -and $driveName.EndsWith(":")) {
-            $drive = Get-PSDrive -Name $driveName.Substring(0, 1) -ErrorAction SilentlyContinue
-            if ($null -ne $drive) {
-                $freeGb = [math]::Round($drive.Free / 1073741824, 2)
-                if ($freeGb -lt $minGb) {
-                    Add-Violation $ruleId ($targetFull.Replace("\", "/")) 0 ("R-C-15 free space " + $freeGb + " GB is below threshold " + $minGb + " GB.")
-                } else {
-                    Write-Info ("R-C-15 free space on " + $driveName + ": " + $freeGb + " GB (threshold " + $minGb + " GB).")
-                }
+    if ($script:Config.build.forbidRepoLocalTarget -ne $false) {
+        $repoTarget = Join-Path $script:RootFull "target"
+        $count = Get-BuildFileCount $repoTarget
+        if ($count -gt 0) {
+            Add-Violation $ruleId (Get-RelativePath $repoTarget) 0 ("R-C-15 repo-local target contains " + $count + " build file(s); build products must use " + $envName + ".")
+        }
+    }
+
+    if ($script:Config.build.checkSharedWorktrees -eq $true -and $envName -ne "") {
+        $parent = Split-Path -Parent $script:RootFull
+        foreach ($sibling in @(Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue)) {
+            if ($sibling.Name -notmatch '^Meito') { continue }
+            if ($sibling.FullName -eq $script:RootFull) { continue }
+            if (-not (Test-Path -LiteralPath (Join-Path $sibling.FullName "Cargo.toml"))) { continue }
+            $siblingTarget = Join-Path $sibling.FullName "target"
+            $count = Get-BuildFileCount $siblingTarget
+            if ($count -gt 0) {
+                Add-Violation $ruleId (Get-RelativePath $siblingTarget) 0 ("R-C-15 worktree " + $sibling.Name + " has a repo-local target; all worktrees must share " + $envName + ".")
+            }
+        }
+    }
+
+    if ($script:Config.build.checkSystemDrive -ne $false -and $targetRoot -ne "" -and $targetRoot.ToLowerInvariant() -eq $systemRoot.ToLowerInvariant()) {
+        Add-Violation $ruleId ($targetFull.Replace("\", "/")) 0 ("R-C-15 build target is on system drive " + $systemRoot + "; set " + $envName + " to another drive.")
+    }
+
+    $minGb = $MinFreeGB
+    if ($minGb -lt 0) { $minGb = [int]$script:Config.build.minFreeGB }
+    $driveName = $targetRoot.TrimEnd('\', '/')
+    if ($driveName -ne "" -and $driveName.Length -eq 2 -and $driveName.EndsWith(":")) {
+        $drive = Get-PSDrive -Name $driveName.Substring(0, 1) -ErrorAction SilentlyContinue
+        if ($null -ne $drive) {
+            $freeGb = [math]::Round($drive.Free / 1073741824, 2)
+            if ($freeGb -lt $minGb) {
+                Add-Violation $ruleId ($targetFull.Replace("\", "/")) 0 ("R-C-15 free space " + $freeGb + " GB is below threshold " + $minGb + " GB; stop builds and report before continuing.")
+            } else {
+                Write-Info ("R-C-15 target " + $targetFull + " free " + $freeGb + " GB (threshold " + $minGb + " GB).")
             }
         }
     }

@@ -12,6 +12,8 @@ permissions:
 jobs:
   legacy-gate-windows:
     runs-on: windows-latest
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/meito-target
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +28,8 @@ jobs:
 
   rust-gate-linux:
     runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/meito-target
     steps:
       - uses: actions/checkout@v4
 

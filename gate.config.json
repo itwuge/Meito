@@ -122,10 +122,13 @@
   },
 
   "build": {
-    "targetDirEnv": "MEITO_BUILD_DIR",
-    "defaultTargetDir": ".meito/build",
+    "targetDirEnv": "CARGO_TARGET_DIR",
+    "defaultTargetDir": "",
     "minFreeGB": 10,
-    "checkSystemDrive": false
+    "checkSystemDrive": true,
+    "requireEnv": true,
+    "forbidRepoLocalTarget": true,
+    "checkSharedWorktrees": true
   },
 
   "logging": {
