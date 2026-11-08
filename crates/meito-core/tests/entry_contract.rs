@@ -1,10 +1,12 @@
 //! File: 入口端口契约测试——端口值、回环绑定与非法输入拒绝。
 //!
-//! 断言直接来自 `contracts/entry.json`；实现不得在代码里另写端口。
+//! 期望值一律从 `contracts/entry.json` 直接解析取得，不在测试里复写端口常量；实现不得另写
+//! 端口，改写契约后加载器必须跟着变。
 
 use std::path::{Path, PathBuf};
 
-use meito_core::{load_entry_ports, ErrorCode, ENTRY_CONTRACT_PATH};
+use meito_core::{load_entry_ports, EntryPorts, ErrorCode, ENTRY_CONTRACT_PATH};
+use serde_json::{json, Value};
 
 // ===== 测试辅助 =====
 
@@ -24,12 +26,26 @@ fn temp_root(name: &str) -> PathBuf {
     root
 }
 
+/// 读取仓库契约原文。
+fn contract_text() -> String {
+    std::fs::read_to_string(repository_root().join(ENTRY_CONTRACT_PATH)).expect("读取仓库入口契约")
+}
+
 /// 把仓库契约复制到临时目录后替换一处文本。
 fn copy_contract(root: &Path, from: &str, to: &str) {
-    let text = std::fs::read_to_string(repository_root().join(ENTRY_CONTRACT_PATH))
-        .expect("读取仓库入口契约");
-    let replaced = text.replace(from, to);
+    let replaced = contract_text().replace(from, to);
     std::fs::write(root.join(ENTRY_CONTRACT_PATH), replaced).expect("写入临时契约");
+}
+
+/// 直接从契约 JSON 取出三个端口，作为测试的期望值来源。
+fn expected_ports() -> EntryPorts {
+    let value: Value = serde_json::from_str(&contract_text()).expect("解析仓库入口契约");
+    let port = |key: &str| value["ports"][key].as_u64().expect("ports 字段必须是整数") as u16;
+    EntryPorts {
+        terminal: port("terminal"),
+        graphical: port("graphical"),
+        vnc: port("vnc"),
+    }
 }
 
 // ===== 用例 =====
@@ -37,9 +53,38 @@ fn copy_contract(root: &Path, from: &str, to: &str) {
 #[test]
 fn ports_match_contract() {
     let ports = load_entry_ports(&repository_root()).expect("加载入口契约");
-    assert_eq!(ports.terminal, 7681, "terminal 端口必须与契约一致");
-    assert_eq!(ports.graphical, 6080, "graphical 端口必须与契约一致");
-    assert_eq!(ports.vnc, 5900, "vnc 端口必须与契约一致");
+    assert_eq!(
+        ports,
+        expected_ports(),
+        "加载结果必须与 contracts/entry.json 的 ports 一致"
+    );
+}
+
+#[test]
+fn loader_follows_rewritten_ports() {
+    let root = temp_root("rewritten");
+    let mut value: Value = serde_json::from_str(&contract_text()).expect("解析仓库入口契约");
+    value["ports"] = json!({
+        "terminal": 17001,
+        "graphical": 16080,
+        "vnc": 15900
+    });
+    std::fs::write(
+        root.join(ENTRY_CONTRACT_PATH),
+        serde_json::to_string(&value).expect("序列化临时契约"),
+    )
+    .expect("写入临时契约");
+    let ports = load_entry_ports(&root).expect("加载改写后的入口契约");
+    assert_eq!(
+        ports,
+        EntryPorts {
+            terminal: 17001,
+            graphical: 16080,
+            vnc: 15900,
+        },
+        "加载器必须读取契约值，不得写死端口"
+    );
+    std::fs::remove_dir_all(&root).expect("清理临时目录");
 }
 
 #[test]
