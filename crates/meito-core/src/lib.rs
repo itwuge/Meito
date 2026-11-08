@@ -6,7 +6,7 @@
 // ===== 契约常量 =====
 
 /// 当前冻结的契约版本，必须与 `contracts/contract-version.json` 一致。
-pub const CONTRACT_VERSION: &str = "0.3.2";
+pub const CONTRACT_VERSION: &str = "0.3.3";
 
 /// 会话日志路径前缀，完整路径为 `logs/session-<id>.jsonl`。
 pub const SESSION_LOG_PATH_PREFIX: &str = "logs/session-";

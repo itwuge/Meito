@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.2",
+  "contractVersion": "0.3.3",
   "purpose": "runner 侧加密连接包的唯一格式定义；meito-link 只存密文，不解析、不记录",
   "magic": "MEITO1",
   "magicBytes": 6,

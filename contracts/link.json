@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.3.2",
+  "contractVersion": "0.3.3",
   "purpose": "meito-link 协调服务的服务端语义：通道生命周期、令牌哈希、读取语义、限流、状态码映射与日志禁项",
   "channelId": {
     "opaque": true,

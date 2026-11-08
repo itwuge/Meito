@@ -112,6 +112,8 @@ Meito 要在 GitHub 托管 runner 上获得一个可交互会话，用于 `make 
 
 判据纪律（R-D-3、R-D-4、R-D-5）：判据先写进 `docs/验收记录/`，再执行；不达标不改阈值、不放宽判据、不把“没报错”写成“通过”。未跑通项统一写“未验证”。
 
+图形入口相关判据（SC-06/SC-07 中的 VNC 部分）在 v1 标为 optional，不阻塞 v1 验收；v1 图形兜底与 P2 取舍见 §10.8。
+
 ---
 
 ## 3. 用户使用流程
@@ -620,6 +622,8 @@ meito clean --orphans --dry-run
 
 **人工审计项（未纳入机器覆盖，文档已显式标注“人工审计”）**：§10.2 的依赖安装耗时估算表、§10.5 带宽与 CPU 估算、§10.6 job 硬上限下的取舍，以及 §4/§7/§11/§12/§14 中的工程估算与对比数据。这些数值不是验收阈值或契约字段，改由评审人对照契约为准；若后续成为验收依据，必须先落 `contracts/` 再移入机器覆盖。
 
+**预留字段规则（0.3.3 起）**：`contracts/entry.json#requiredness` 把图形入口字段标为 `reserved`，`contracts/acceptance.json#graphical.optionalMetrics` 把图形指标标为 `optional`；保留数值与预留位，但 v1 门禁不因未实现而红。若要把任一图形字段改为 `required`，必须在 `docs/变更记录.md` 新增标题含「图形入口转正」的条目，否则 `contract-check` 失败。
+
 架构检查失败即阻断合并；豁免只能写进 `docs/门禁豁免清单.md` 并给出替代验证，不能静默跳过。
 
 ### 5.10 网页版外壳的边界
@@ -913,7 +917,9 @@ ttyd -W -i 127.0.0.1 -p 7681 -m 1 -O -T xterm-256color \
 - menuconfig 的 TUI 依赖 PTY 与 xterm.js 兼容性；**未验证**，M4 用真实 menuconfig 做冒烟。
 - 端口、绑定地址与 `-W`/`-m 1`/`-O` 取自 `contracts/entry.json`，本文不另写数值。
 
-### 10.4 图形入口（noVNC）
+### 10.4 图形入口（noVNC 栈：P2 可选预留）
+
+v1 不启动本栈，以下配置作为 P2 预留保留；v1 本地版图形兜底走 SSH X11 转发，网页版候选与取舍见 §10.8。
 
 ```text
 Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
@@ -927,7 +933,7 @@ websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 &
 - 主鉴权：隧道侧一次性 token + SSH 密钥/WebRTC 信令鉴权 + actor 白名单。
 - 禁止 `0.0.0.0:6080`、禁止公网直连、禁止任何隧道中继；`ss -ltnp` 是验收项。
 - 图形入口用于必须鼠标操作的配置工具；普通 menuconfig 优先 terminal。
-- 端口 5900/6080、帧缓冲 1280x800x24 与 VNC 密码 8 位取自 `contracts/entry.json`，本文不另写数值。
+- 端口 5900/6080、帧缓冲 1280x800x24 与 VNC 密码 8 位取自 `contracts/entry.json`，本文不另写数值；这些字段在 0.3.3 起标记为 `reserved`，保留预留位但不阻塞 v1 验收。
 
 ### 10.5 带宽与 CPU 代价（人工审计：估算，未实测）
 
@@ -956,6 +962,18 @@ websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 &
 - 只读实例优先用不带 `-W` 的 ttyd；若必须复用同一实例，网关层丢弃 stdin/键盘事件。
 - 只读链接不能升级为写；升级必须重新走 `meito share --write` 并校验 actor。
 - 两类链接都不写入 Job Summary 的完整连接串；只写类型与过期时间。
+
+### 10.8 图形入口取舍（P2）：KasmVNC 首选，noVNC 兜底
+
+对比结论已出（结论本身未实测）：
+
+1. 网页版图形入口首选 KasmVNC：单包集成 X/VNC/Web 客户端，组件数量与维护成本最低。
+2. 前提风险：KasmVNC 偏离标准 RFB、只能使用其自带 Web 客户端，能否接入我们的 WebRTC DataChannel 传输**未验证**；若桥接成本不可接受，退回 noVNC（传输层可替换，但不得依赖 KasmVNC 的 RFB 扩展）。
+3. xpra 不作首选；`ssh -X` 仅限本地版 P2（需要本机 X server，Windows 侧依赖 X server 或 WSLg）。
+4. 带宽归属：协调节点仅承载信令与 STUN（单会话量级 kbps），画面字节全部压在 runner 出方向；带宽不足时调画质参数（分辨率/帧率/编码质量），不得扩容协调节点或引入中继。
+5. 安装耗时、码率、IME 表现均**未实测**；M6 用 `nload`/`pidstat` 与真实输入法验证。若 KasmVNC 自带客户端无法经 DataChannel 桥接，则回退 noVNC，此时以 `contracts/entry.json` 中预留的端口与帧缓冲为准。
+
+本地版 v1 兜底：`ssh -X` 转发单个图形程序（如 `menuconfig` 的图形前端或必须鼠标的配置工具），不启动 runner 侧 X 栈；网页版 v1 不开图形入口。
 
 ---
 
@@ -1147,7 +1165,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\arch-check.ps1
 | G-10 | 接口冻结 | `docs/接口冻结.md` 存在且版本化；两外壳 stub 编译通过；冻结后改动有变更记录 | R-D-9、本设计 13.7 |
 | G-11 | 一事一提交 | 提交前人工核对；CI 不强制 commit 粒度，但阶段验收检查 commit 数与阶段号 | R-T-9 |
 | G-12 | 版本递增 | `gate.ps1` 的 R-D-9：源码变更未 bump 版本即失败 | R-D-9、R-D-12 |
-| G-13 | 数值单一来源 | `contract-check`：文档正文的阈值/时长/上限/端口/状态码必须在 `contracts/` 有对应字段；机器校验覆盖 design §2、§3.2、§5.6、§5.7、§5.10、§8.3、§9.4、§10.2（启停顺序）、§10.3、§10.4、§10.7 与接口冻结 §5.2–§5.4；§10.2 估算表、§10.5、§10.6 等显式标注“人工审计”，不纳入机器覆盖 | 本设计 5.9、R-D-13 |
+| G-13 | 数值单一来源 | `contract-check`：文档正文的阈值/时长/上限/端口/状态码必须在 `contracts/` 有对应字段；机器校验覆盖 design §2、§3.2、§5.6、§5.7、§5.10、§8.3、§9.4、§10.2（启停顺序）、§10.3、§10.4、§10.7 与接口冻结 §5.2–§5.4；图形入口字段为 `reserved`、图形指标为 `optional`，不阻塞 v1；§10.2 估算表、§10.5、§10.6 等显式标注“人工审计”，不纳入机器覆盖 | 本设计 5.9、R-D-13 |
 
 门禁配置（`gate.config.json`）必须体现：`crates/*/src/**/*.rs` 扫描、`//!` 头注释、`// ===== 组件名 =====` 分区、`tracing` 依赖、CLI 展示层 print 白名单。模板原件的 `tools/gate-template/` 保留，活动脚本在 `scripts/`。
 

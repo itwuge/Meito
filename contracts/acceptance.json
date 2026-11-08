@@ -1,6 +1,26 @@
 {
-  "contractVersion": "0.3.2",
-  "purpose": "SC-01 一类验收指标的单一来源；验收脚本必须引用 metrics，不得在文档或脚本里另写数值",
+  "contractVersion": "0.3.3",
+  "purpose": "SC-01 一类验收指标的单一来源；验收脚本必须引用 metrics，不得在文档或脚本里另写数值。图形入口相关指标为 optional，不阻塞 v1 验收",
+  "requiredness": {
+    "sc01ColdStartP95Seconds": "required",
+    "sc01Samples": "required",
+    "sc04AuthFailureSeconds": "required",
+    "sc05TransferSizeMegabytes": "required",
+    "sc05TransferRepeats": "required",
+    "sc05ServerOverheadPercentMax": "required",
+    "sc07UnauthorizedStatuses": "required",
+    "sc07VncPasswordOnlyMustFail": "optional",
+    "sc08MaxOverrunSeconds": "required",
+    "sc08IdleStopGraceMinutes": "required",
+    "sc08DownStopGraceSeconds": "required",
+    "sc13DefconfigRuns": "required",
+    "sc15FirstRunMinutes": "required"
+  },
+  "graphical": {
+    "status": "reserved",
+    "reason": "图形入口渲染方案待定；与图形入口相关的指标不阻塞 v1 验收",
+    "optionalMetrics": ["sc07VncPasswordOnlyMustFail"]
+  },
   "metrics": {
     "sc01ColdStartP95Seconds": 180,
     "sc01Samples": 10,
@@ -9,6 +29,7 @@
     "sc05TransferRepeats": 3,
     "sc05ServerOverheadPercentMax": 5,
     "sc07UnauthorizedStatuses": [401, 403],
+    "sc07VncPasswordOnlyMustFail": true,
     "sc08MaxOverrunSeconds": 60,
     "sc08IdleStopGraceMinutes": 5,
     "sc08DownStopGraceSeconds": 60,
